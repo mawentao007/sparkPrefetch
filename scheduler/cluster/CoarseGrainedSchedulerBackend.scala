@@ -173,8 +173,8 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
           val serializedShuffleBlockInfo = ser.serialize[ShuffleBlockInfo](shuffleBlockInfo)
           executorDataMap.get(executorId) match {
             case Some(executorData) =>
+              //注意一定要用SerializableBuffer!!!
               executorData.executorActor ! PushRequest(new SerializableBuffer(serializedShuffleBlockInfo))
-              executorData.executorActor ! PreFetchData("fuck")
               logInfo("%%%%%%%%%%%% datasent %%%%%%%%%")
             case None =>
           }

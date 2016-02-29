@@ -521,6 +521,8 @@ private[spark] class TaskSchedulerImpl(
 
   //mv
   override def pushTaskResult(shuffleId:Int,mapStatus:MapStatus,executorId:String): Unit ={
+
+//partitionId就是mapId
     val shuffleBlockInfo = new ShuffleBlockInfo(mapStatus.location,Array("aa","bb","cc"),
       Array(111.2.toLong,222.3.toLong,333.4.toLong))
     backend.pushTaskResults("1",shuffleBlockInfo)

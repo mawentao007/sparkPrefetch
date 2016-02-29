@@ -992,13 +992,15 @@ class DAGScheduler(
             }
 
 
-            //mv
+            //mv 在这里进行push有一个很重要的好处是到这里说明task执行成功,不需要去处理task执行失败等场景.
           case smt: ShuffleMapTask =>
             updateAccumulators(event)
             val status = event.result.asInstanceOf[MapStatus]
             val execId = status.location.executorId
             logDebug("ShuffleMapTask finished on " + execId)
             //mv
+            //smt.partitionId就是mapId,还差reducedId,调度得来; stage.numPartitions
+
             val shuffleId = shuffleToMapStage.find(_._2 == stage) match {
               case Some((k,v)) => k
               case None => -1
@@ -1006,6 +1008,8 @@ class DAGScheduler(
             if(shuffleId == -1){
               logError("%%%%%% can not find shuffleId for stage " + stage.id + " %%%%%%")
             }
+            logInfo("%%%%%%% mapstatus blocks num " + status.getBlocksNum+ " | mapId " + stage.numPartitions +
+             " | shuffleId " + shuffleId + " %%%%%%")
 
             taskScheduler.pushTaskResult(shuffleId,status,execId)
             //logInfo("%%%%%% " + status.location.executorId + " $$$ " + task.stageId + " $$$ " + task.preferredLocations.toArray )

@@ -39,6 +39,9 @@ private[spark] sealed trait MapStatus {
    * necessary for correctness, since block fetchers are allowed to skip zero-size blocks.
    */
   def getSizeForBlock(reduceId: Int): Long
+
+  //mv
+  def getBlocksNum:Int
 }
 
 
@@ -55,7 +58,7 @@ private[spark] object MapStatus {
   private[this] val LOG_BASE = 1.1
 
   /**
-   * Compress a size in bytes to 8 bits for efficient reporting of map output sizes.
+   * Compress a size in bytes to 8 bits for efficient reporting of map Blocks sizes.
    * We do this by encoding the log base 1.1 of the size as an integer, which can support
    * sizes up to 35 GB with at most 10% error.
    */
@@ -100,6 +103,9 @@ private[spark] class CompressedMapStatus(
     this(loc, uncompressedSizes.map(MapStatus.compressSize))
   }
 
+  //mv
+  override def getBlocksNum = compressedSizes.length
+  //--mv
   override def location: BlockManagerId = loc
 
   override def getSizeForBlock(reduceId: Int): Long = {
@@ -134,14 +140,16 @@ private[spark] class HighlyCompressedMapStatus private (
     private[this] var loc: BlockManagerId,
     private[this] var numNonEmptyBlocks: Int,
     private[this] var emptyBlocks: RoaringBitmap,
-    private[this] var avgSize: Long)
+    private[this] var avgSize: Long,
+    private[this] val blocksNum:Int)
   extends MapStatus with Externalizable {
 
   // loc could be null when the default constructor is called during deserialization
   require(loc == null || avgSize > 0 || numNonEmptyBlocks == 0,
     "Average size can only be zero for map stages that produced no output")
 
-  protected def this() = this(null, -1, null, -1)  // For deserialization only
+  //mv 多一个参数
+  protected def this() = this(null, -1, null, -1,-1)  // For deserialization only
 
   override def location: BlockManagerId = loc
 
@@ -153,6 +161,9 @@ private[spark] class HighlyCompressedMapStatus private (
     }
   }
 
+  //mv
+  override def getBlocksNum = blocksNum
+  //--mv
   override def writeExternal(out: ObjectOutput): Unit = Utils.tryOrIOException {
     loc.writeExternal(out)
     emptyBlocks.writeExternal(out)
@@ -194,6 +205,9 @@ private[spark] object HighlyCompressedMapStatus {
     } else {
       0
     }
-    new HighlyCompressedMapStatus(loc, numNonEmptyBlocks, emptyBlocks, avgSize)
+
+    //mv
+    new HighlyCompressedMapStatus(loc, numNonEmptyBlocks, emptyBlocks, avgSize, totalNumBlocks)
+    //--mv
   }
 }
