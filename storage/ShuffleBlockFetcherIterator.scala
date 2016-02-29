@@ -189,9 +189,9 @@ final class ShuffleBlockFetcherIterator(
     var totalBlocks = 0
     for ((address, blockInfos) <- blocksByAddress) {
       //mv
-      for(x <- blockInfos) {
-        logInfo("%%%%%%%%%%%%%%%%%%%%%%%%%% " + x._1 + " isShuffle " + x._1.isShuffle + " %%%%%% ")
-      }
+//      for(x <- blockInfos) {
+//        logInfo("%%%%%%%%%%%%%%%%%%%%%%%%%% " + x._1 + " isShuffle " + x._1.isShuffle + " %%%%%% ")
+//      }
       //--mv
       totalBlocks += blockInfos.size
       if (address.executorId == blockManager.blockManagerId.executorId) {

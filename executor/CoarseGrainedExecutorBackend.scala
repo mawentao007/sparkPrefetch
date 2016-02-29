@@ -20,6 +20,9 @@ package org.apache.spark.executor
 import java.net.URL
 import java.nio.ByteBuffer
 
+import org.apache.spark.shuffle.ShuffleBlockInfo
+import org.apache.spark.storage.{BlockId, BlockManagerId}
+
 import scala.collection.mutable
 import scala.concurrent.Await
 
@@ -107,8 +110,15 @@ private[spark] class CoarseGrainedExecutorBackend(
       context.system.shutdown()
 
       //mv
-    case PushRequest(msg) =>
-      logInfo(msg)
+    case PushRequest(data) =>
+      logInfo(" %%%%%% receive data %%%%%%")
+      val ser = SparkEnv.get.closureSerializer.newInstance()
+      val shuffleBlockInfo = ser.deserialize[ShuffleBlockInfo](data.value)
+      logInfo("%%%%%% " + shuffleBlockInfo.loc + shuffleBlockInfo.blockSizes(2) + shuffleBlockInfo.shuffleBlockIds(2) + "%%%%%%" )
+
+
+    case PreFetchData(msg) =>
+      logInfo("%%%%%% backup msg " + msg + " %%%%%%")
   }
 
   override def statusUpdate(taskId: Long, state: TaskState, data: ByteBuffer) {

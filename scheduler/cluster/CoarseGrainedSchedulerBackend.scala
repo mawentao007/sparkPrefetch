@@ -17,7 +17,10 @@
 
 package org.apache.spark.scheduler.cluster
 
+import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicInteger
+
+import org.apache.spark.shuffle.ShuffleBlockInfo
 
 import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet}
 import scala.concurrent.Await
@@ -162,14 +165,23 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
       case RetrieveSparkProps =>
         sender ! sparkProperties
 
-        //mv
-      case PushData(executorId) =>
+      //mv
+      case PushData(executorId, shuffleBlockInfo) =>
         logInfo("%%%%%%%%%%%% Push Data %%%%%%%%%")
-        executorDataMap.get(executorId) match {
-          case Some(executorData) =>
-            executorData.executorActor ! PushRequest(" %%%%%%&&&&&&%%%%%%%&&&&&&&&")
-          case None =>
+        try {
+          val ser = SparkEnv.get.closureSerializer.newInstance()
+          val serializedShuffleBlockInfo = ser.serialize[ShuffleBlockInfo](shuffleBlockInfo)
+          executorDataMap.get(executorId) match {
+            case Some(executorData) =>
+              executorData.executorActor ! PushRequest(new SerializableBuffer(serializedShuffleBlockInfo))
+              executorData.executorActor ! PreFetchData("fuck")
+              logInfo("%%%%%%%%%%%% datasent %%%%%%%%%")
+            case None =>
+          }
+        } catch {
+          case e:Exception => logInfo("Some thing wrong")
         }
+
         //--mv
 
     }
@@ -322,8 +334,8 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
   def numExistingExecutors: Int = executorDataMap.size
 
   //mv
-  def pushTaskResults(msg:String): Unit ={
-    driverActor ! PushData(msg)
+  def pushTaskResults(executorId:String,shuffleBlockInfo:ShuffleBlockInfo): Unit ={
+    driverActor ! PushData(executorId,shuffleBlockInfo)
   }
   //--mv
 

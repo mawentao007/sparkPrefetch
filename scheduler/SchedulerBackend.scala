@@ -17,6 +17,8 @@
 
 package org.apache.spark.scheduler
 
+import org.apache.spark.shuffle.ShuffleBlockInfo
+
 /**
  * A backend interface for scheduling systems that allows plugging in different ones under
  * TaskSchedulerImpl. We assume a Mesos-like model where the application gets resource offers as
@@ -42,7 +44,7 @@ private[spark] trait SchedulerBackend {
   def applicationId(): String = appId
 
   //mv
-  def pushTaskResults(msg:String):Unit
+  def pushTaskResults(executorId:String,shuffleBlockInfo:ShuffleBlockInfo):Unit
   //--mv
 
 }

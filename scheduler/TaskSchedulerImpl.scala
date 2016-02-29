@@ -21,6 +21,8 @@ import java.nio.ByteBuffer
 import java.util.{TimerTask, Timer}
 import java.util.concurrent.atomic.AtomicLong
 
+import org.apache.spark.shuffle.ShuffleBlockInfo
+
 import scala.concurrent.duration._
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.HashMap
@@ -519,7 +521,9 @@ private[spark] class TaskSchedulerImpl(
 
   //mv
   override def pushTaskResult(shuffleId:Int,mapStatus:MapStatus,executorId:String): Unit ={
-    backend.pushTaskResults("test")
+    val shuffleBlockInfo = new ShuffleBlockInfo(mapStatus.location,Array("aa","bb","cc"),
+      Array(111.2.toLong,222.3.toLong,333.4.toLong))
+    backend.pushTaskResults("1",shuffleBlockInfo)
   }
   //--mv
 

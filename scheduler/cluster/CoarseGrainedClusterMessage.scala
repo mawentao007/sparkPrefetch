@@ -20,6 +20,7 @@ package org.apache.spark.scheduler.cluster
 import java.nio.ByteBuffer
 
 import org.apache.spark.TaskState.TaskState
+import org.apache.spark.shuffle.ShuffleBlockInfo
 import org.apache.spark.util.{SerializableBuffer, Utils}
 
 private[spark] sealed trait CoarseGrainedClusterMessage extends Serializable
@@ -86,7 +87,10 @@ private[spark] object CoarseGrainedClusterMessages {
   case class KillExecutors(executorIds: Seq[String]) extends CoarseGrainedClusterMessage
 
   //mv
-  case class PushData(executorId:String) extends CoarseGrainedClusterMessage
-  case class PushRequest(msg:String) extends CoarseGrainedClusterMessage
+  //driver端内部消息
+  case class PushData(executorId:String,shuffleBlockInfo:ShuffleBlockInfo) extends CoarseGrainedClusterMessage
+  //driver与executor之间消息
+  case class PushRequest(data:SerializableBuffer) extends CoarseGrainedClusterMessage
+  case class PreFetchData(msg:String) extends CoarseGrainedClusterMessage
 
 }

@@ -301,7 +301,6 @@ private[spark] class BlockManager(
    */
   override def getBlockData(blockId: BlockId): ManagedBuffer = {
     if (blockId.isShuffle) {
-      logInfo("%%%%%%%%%%%%%%%%%%%%%%%%%% " + blockId + " isShuffle " + blockId.isShuffle + " %%%%%% ")
       shuffleManager.shuffleBlockManager.getBlockData(blockId.asInstanceOf[ShuffleBlockId])
     } else {
       val blockBytesOpt = doGetLocal(blockId, asBlockResult = false)
