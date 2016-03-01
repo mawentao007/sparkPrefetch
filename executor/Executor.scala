@@ -21,10 +21,14 @@ import java.io.File
 import java.lang.management.ManagementFactory
 import java.net.URL
 import java.nio.ByteBuffer
+import java.nio.file.Files
 import java.util.concurrent._
 
+import org.apache.spark.network.buffer.ManagedBuffer
+import org.apache.spark.network.shuffle.BlockFetchingListener
+
 import scala.collection.JavaConversions._
-import scala.collection.mutable.{ArrayBuffer, HashMap}
+import scala.collection.mutable.{Queue, ArrayBuffer, HashMap}
 import scala.util.control.NonFatal
 
 import akka.actor.Props
@@ -32,8 +36,8 @@ import akka.actor.Props
 import org.apache.spark._
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.scheduler._
-import org.apache.spark.shuffle.FetchFailedException
-import org.apache.spark.storage.{StorageLevel, TaskResultBlockId}
+import org.apache.spark.shuffle.{ShuffleBlockInfo, FetchFailedException}
+import org.apache.spark.storage._
 import org.apache.spark.util.{ChildFirstURLClassLoader, MutableURLClassLoader,
   SparkUncaughtExceptionHandler, AkkaUtils, Utils}
 
@@ -296,6 +300,72 @@ private[spark] class Executor(
       }
     }
   }
+
+
+  //mv
+  class PreFetchRunner(
+      execBackend: ExecutorBackend,
+      serializedShuffleBlockInfo: ByteBuffer)
+    extends Runnable {
+
+    private[this] val maxBytesInFlight = SparkEnv.get.conf.getLong("spark.reducer.maxMbInFlight", 48) * 1024 * 1024
+
+    private[this] val fetchRequests = new Queue[FetchRequest]
+
+    override def run(): Unit = {
+      val ser = env.closureSerializer.newInstance()
+      val shuffleBlockInfo = ser.deserialize[ShuffleBlockInfo](serializedShuffleBlockInfo)
+      val targetLoc = shuffleBlockInfo.loc
+      val blockIdToSize: Array[(BlockId, Long)] =
+        shuffleBlockInfo.shuffleBlockIds.zip(shuffleBlockInfo.blockSizes)
+
+
+    }
+
+
+    private[this] def buildFetchRequest(
+                                         loc: BlockManagerId,
+                                         blockIdToSize: Array[(BlockId, Long)]): FetchRequest = {
+
+      val targetRequestSize = math.max(maxBytesInFlight / 5, 1L)
+      logDebug("maxBytesInFlight: " + maxBytesInFlight + ", targetRequestSize: " + targetRequestSize)
+
+
+      val totalBlocks = blockIdToSize.length
+
+      val nonEmptyBlockIdToSize = blockIdToSize.filter(_._2 != 0)
+
+      val totalRequests = nonEmptyBlockIdToSize.length
+
+      val fetchRequest = new FetchRequest(loc, nonEmptyBlockIdToSize)
+      fetchRequest
+    }
+
+    private[this] def sendRequest(req: FetchRequest) {
+
+      val sizeMap = req.blocks.map { case (blockId, size) => (blockId.toString, size) }.toMap
+      val blockIds = req.blocks.map(_._1.toString)
+
+      val address = req.address
+      env.blockManager.shuffleClient.fetchBlocks(address.host, address.port, address.executorId, blockIds.toArray,
+        new BlockFetchingListener {
+          override def onBlockFetchSuccess(blockId: String, buf: ManagedBuffer): Unit = {
+          }
+
+          override def onBlockFetchFailure(blockId: String, e: Throwable): Unit = {
+            logError(s"Failed to get block(s) from ${req.address.host}:${req.address.port}", e)
+
+          }
+        }
+      )
+    }
+
+    case class FetchRequest(address: BlockManagerId, blocks: Seq[(BlockId, Long)]) {
+      val size = blocks.map(_._2).sum
+    }
+
+  }
+  //--mv
 
   /**
    * Create a ClassLoader for use in tasks, adding any JARs specified by the user or any classes

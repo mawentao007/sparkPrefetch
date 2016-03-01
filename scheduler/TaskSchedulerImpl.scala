@@ -36,7 +36,7 @@ import org.apache.spark.scheduler.SchedulingMode.SchedulingMode
 import org.apache.spark.scheduler.TaskLocality.TaskLocality
 import org.apache.spark.util.Utils
 import org.apache.spark.executor.TaskMetrics
-import org.apache.spark.storage.BlockManagerId
+import org.apache.spark.storage.{ShuffleBlockId, BlockManagerId}
 
 /**
  * Schedules tasks for multiple types of clusters by acting through a SchedulerBackend.
@@ -523,7 +523,8 @@ private[spark] class TaskSchedulerImpl(
   override def pushTaskResult(shuffleId:Int,mapStatus:MapStatus,executorId:String): Unit ={
 
 //partitionId就是mapId
-    val shuffleBlockInfo = new ShuffleBlockInfo(mapStatus.location,Array("aa","bb","cc"),
+    val shuffleBlockInfo = new ShuffleBlockInfo(mapStatus.location,
+          Array(ShuffleBlockId(1,1,1),ShuffleBlockId(2,22,222), ShuffleBlockId(3,33,333)),
       Array(111.2.toLong,222.3.toLong,333.4.toLong))
     backend.pushTaskResults("1",shuffleBlockInfo)
   }

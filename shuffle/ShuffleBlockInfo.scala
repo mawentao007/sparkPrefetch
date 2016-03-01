@@ -20,7 +20,7 @@ package org.apache.spark.shuffle
 import java.io.{Externalizable, ObjectInput, ObjectOutput}
 
 import org.apache.spark.Logging
-import org.apache.spark.storage.BlockManagerId
+import org.apache.spark.storage.{ShuffleBlockId, BlockManagerId}
 import org.apache.spark.util.Utils
 
 import scala.collection.mutable.ArrayBuffer
@@ -34,10 +34,10 @@ import scala.collection.mutable.ArrayBuffer
  */
 class ShuffleBlockInfo(
                         var loc:BlockManagerId,
-                        var shuffleBlockIds:Array[String],
+                        var shuffleBlockIds:Array[ShuffleBlockId],
                         var blockSizes:Array[Long]) extends Externalizable with Logging {
 
-  protected def this() = this(null.asInstanceOf[BlockManagerId], null.asInstanceOf[Array[String]],null.asInstanceOf[Array[Long]])
+  protected def this() = this(null.asInstanceOf[BlockManagerId], null.asInstanceOf[Array[ShuffleBlockId]],null.asInstanceOf[Array[Long]])
 
 
   override def writeExternal(out: ObjectOutput): Unit = Utils.tryOrIOException {
@@ -51,10 +51,10 @@ class ShuffleBlockInfo(
   override def readExternal(in: ObjectInput): Unit = Utils.tryOrIOException {
     loc = BlockManagerId(in)
     val dataLen = in.readInt()
-    val shuffleBlockIdsBuffer = new ArrayBuffer[String]
+    val shuffleBlockIdsBuffer = new ArrayBuffer[ShuffleBlockId]
     for(x <- 0 to dataLen-1){
-      val tmp = in.readObject().toString
-      shuffleBlockIdsBuffer.append(tmp)
+      val tmp = in.readObject()
+      shuffleBlockIdsBuffer.append(tmp.asInstanceOf[ShuffleBlockId])
     }
     shuffleBlockIds = shuffleBlockIdsBuffer.toArray
     val blockSizesByte = new Array[Byte](dataLen)
