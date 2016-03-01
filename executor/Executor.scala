@@ -353,7 +353,13 @@ private[spark] class Executor(
           override def onBlockFetchSuccess(blockId: String, buf: ManagedBuffer): Unit = {
               buf.retain()
               env.blockManager.putBlockData(BlockId(blockId),buf,StorageLevel.DISK_ONLY)
-              logInfo("%%%%%% write block " + blockId + " %%%%%%")
+              env.blockManager.getStatus(BlockId(blockId)) match{
+                case Some(s) =>
+                  logInfo("%%%%%% write block " + blockId + " size is " + s.diskSize + " %%%%%%")
+                case None =>
+                  logInfo("%%%%%% write block " + blockId + " failed %%%%%%" )
+              }
+
               buf.release()
             }
 

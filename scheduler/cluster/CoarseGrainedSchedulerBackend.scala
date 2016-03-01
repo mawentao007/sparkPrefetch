@@ -340,6 +340,8 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
     val blockIds = blockIdAndSize.map(_._1).toArray
     val sizes = blockIdAndSize.map(_._2).toArray
 
+    //blockManagerId用于指示目标位置，也就是去哪里取数据，是从mapStatus中得到的；
+    //executorId标示这个preFetch指示谁来接受，也就是谁去取，也就是下一个阶段的task的位置，通过调度获取的；
     val executorId = "1"
     executorIdAndShuffleBlockInfo.append((executorId,new ShuffleBlockInfo(blockManagerId,blockIds,sizes)))
 
