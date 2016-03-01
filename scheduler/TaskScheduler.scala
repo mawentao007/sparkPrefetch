@@ -75,7 +75,7 @@ private[spark] trait TaskScheduler {
   def applicationId(): String = appId
 
   //mv
-  def pushTaskResult(shuffleId:Int,status:MapStatus,exectorId:String):Unit
+  def preFetchPrepare(shuffleId:Int,mapId:Int,status:MapStatus):Unit
   //--mv
 
 }

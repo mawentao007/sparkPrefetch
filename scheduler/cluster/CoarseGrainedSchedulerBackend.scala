@@ -21,6 +21,7 @@ import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicInteger
 
 import org.apache.spark.shuffle.ShuffleBlockInfo
+import org.apache.spark.storage.{BlockManagerId, ShuffleBlockId}
 
 import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet}
 import scala.concurrent.Await
@@ -166,15 +167,13 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
         sender ! sparkProperties
 
       //mv
-      case PushData(executorId, shuffleBlockInfo) =>
-        logInfo("%%%%%%%%%%%% Push Data %%%%%%%%%")
+      case PreFetchDataInternal(executorId, serializedShuffleBlockInfo) =>
+        logInfo("%%%%%%%%%%%% PreFetchDataInternal %%%%%%%%%")
         try {
-          val ser = SparkEnv.get.closureSerializer.newInstance()
-          val serializedShuffleBlockInfo = ser.serialize[ShuffleBlockInfo](shuffleBlockInfo)
           executorDataMap.get(executorId) match {
             case Some(executorData) =>
               //注意一定要用SerializableBuffer!!!
-              executorData.executorActor ! PushRequest(new SerializableBuffer(serializedShuffleBlockInfo))
+              executorData.executorActor ! PreFetchData(new SerializableBuffer(serializedShuffleBlockInfo))
               logInfo("%%%%%%%%%%%% datasent %%%%%%%%%")
             case None =>
           }
@@ -334,8 +333,20 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
   def numExistingExecutors: Int = executorDataMap.size
 
   //mv
-  def pushTaskResults(executorId:String,shuffleBlockInfo:ShuffleBlockInfo): Unit ={
-    driverActor ! PushData(executorId,shuffleBlockInfo)
+  def schePreFetch(blockManagerId:BlockManagerId,blockIdAndSize:Array[(ShuffleBlockId,Long)]): Unit ={
+    val ser = SparkEnv.get.closureSerializer.newInstance()
+    val executorIdAndShuffleBlockInfo = new ArrayBuffer[(String,ShuffleBlockInfo)]()
+    //这里要去检查系统资源，选出合适的executor
+    val blockIds = blockIdAndSize.map(_._1).toArray
+    val sizes = blockIdAndSize.map(_._2).toArray
+
+    val executorId = "1"
+    executorIdAndShuffleBlockInfo.append((executorId,new ShuffleBlockInfo(blockManagerId,blockIds,sizes)))
+
+    for((eId,sbi) <- executorIdAndShuffleBlockInfo) {
+      val serializedShuffleBlockInfo = ser.serialize[ShuffleBlockInfo](sbi)
+      driverActor ! PreFetchDataInternal(eId, serializedShuffleBlockInfo)
+    }
   }
   //--mv
 

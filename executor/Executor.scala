@@ -303,6 +303,14 @@ private[spark] class Executor(
 
 
   //mv
+
+  def startPreFetch(context: ExecutorBackend,
+                    serializedShuffleBlockInfo: ByteBuffer): Unit ={
+    val pr = new PreFetchRunner(context,serializedShuffleBlockInfo)
+    threadPool.execute(pr)
+
+  }
+
   class PreFetchRunner(
       execBackend: ExecutorBackend,
       serializedShuffleBlockInfo: ByteBuffer)
@@ -318,43 +326,39 @@ private[spark] class Executor(
       val targetLoc = shuffleBlockInfo.loc
       val blockIdToSize: Array[(BlockId, Long)] =
         shuffleBlockInfo.shuffleBlockIds.zip(shuffleBlockInfo.blockSizes)
-
-
+      val fetchRequest = buildFetchRequest(targetLoc,blockIdToSize)
+      sendRequest(fetchRequest)
     }
 
 
     private[this] def buildFetchRequest(
                                          loc: BlockManagerId,
                                          blockIdToSize: Array[(BlockId, Long)]): FetchRequest = {
-
       val targetRequestSize = math.max(maxBytesInFlight / 5, 1L)
       logDebug("maxBytesInFlight: " + maxBytesInFlight + ", targetRequestSize: " + targetRequestSize)
-
-
       val totalBlocks = blockIdToSize.length
-
       val nonEmptyBlockIdToSize = blockIdToSize.filter(_._2 != 0)
-
       val totalRequests = nonEmptyBlockIdToSize.length
-
       val fetchRequest = new FetchRequest(loc, nonEmptyBlockIdToSize)
       fetchRequest
     }
 
-    private[this] def sendRequest(req: FetchRequest) {
 
+    private[this] def sendRequest(req: FetchRequest) {
       val sizeMap = req.blocks.map { case (blockId, size) => (blockId.toString, size) }.toMap
       val blockIds = req.blocks.map(_._1.toString)
-
       val address = req.address
       env.blockManager.shuffleClient.fetchBlocks(address.host, address.port, address.executorId, blockIds.toArray,
         new BlockFetchingListener {
           override def onBlockFetchSuccess(blockId: String, buf: ManagedBuffer): Unit = {
-          }
+              buf.retain()
+              env.blockManager.putBlockData(BlockId(blockId),buf,StorageLevel.DISK_ONLY)
+              logInfo("%%%%%% write block " + blockId + " %%%%%%")
+              buf.release()
+            }
 
           override def onBlockFetchFailure(blockId: String, e: Throwable): Unit = {
             logError(s"Failed to get block(s) from ${req.address.host}:${req.address.port}", e)
-
           }
         }
       )

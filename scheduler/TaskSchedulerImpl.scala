@@ -519,14 +519,16 @@ private[spark] class TaskSchedulerImpl(
 
 
 
-  //mv
-  override def pushTaskResult(shuffleId:Int,mapStatus:MapStatus,executorId:String): Unit ={
-
-//partitionId就是mapId
-    val shuffleBlockInfo = new ShuffleBlockInfo(mapStatus.location,
-          Array(ShuffleBlockId(1,1,1),ShuffleBlockId(2,22,222), ShuffleBlockId(3,33,333)),
-      Array(111.2.toLong,222.3.toLong,333.4.toLong))
-    backend.pushTaskResults("1",shuffleBlockInfo)
+  //mv 这里完成块的整理，为下一层的调度做准备工作
+  override def preFetchPrepare(shuffleId:Int,mapId:Int,mapStatus:MapStatus): Unit ={
+    val blockIdAndSize = new ArrayBuffer[(ShuffleBlockId,Long)]()
+    val blockNum = mapStatus.getBlocksNum
+    for(reduceId <- 0 to blockNum-1){
+      blockIdAndSize.append((ShuffleBlockId(shuffleId,mapId,reduceId),
+        mapStatus.getSizeForBlock(reduceId)))
+    }
+    val blockManagerId = mapStatus.location
+    backend.schePreFetch(blockManagerId,blockIdAndSize.toArray)
   }
   //--mv
 

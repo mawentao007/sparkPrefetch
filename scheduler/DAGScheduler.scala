@@ -1008,10 +1008,10 @@ class DAGScheduler(
             if(shuffleId == -1){
               logError("%%%%%% can not find shuffleId for stage " + stage.id + " %%%%%%")
             }
-            logInfo("%%%%%%% mapstatus blocks num " + status.getBlocksNum+ " | mapId " + stage.numPartitions +
+            logInfo("%%%%%%% mapstatus blocks num " + status.getBlocksNum + " | mapId " + stage.numPartitions +
              " | shuffleId " + shuffleId + " %%%%%%")
 
-            taskScheduler.pushTaskResult(shuffleId,status,execId)
+            taskScheduler.preFetchPrepare(shuffleId,smt.partitionId,status)
             //logInfo("%%%%%% " + status.location.executorId + " $$$ " + task.stageId + " $$$ " + task.preferredLocations.toArray )
             //--mv
             if (failedEpoch.contains(execId) && smt.epoch <= failedEpoch(execId)) {

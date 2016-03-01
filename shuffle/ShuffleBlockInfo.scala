@@ -31,6 +31,7 @@ import scala.collection.mutable.ArrayBuffer
 
 /**
  * driver端生成并发送给executor,用来计算要获取的block的信息
+ * 没有吧id和长度写为一组是因为long要进行压缩，分别写的话误差会比较大．
  */
 class ShuffleBlockInfo(
                         var loc:BlockManagerId,

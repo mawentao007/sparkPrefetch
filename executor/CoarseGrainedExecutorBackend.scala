@@ -110,15 +110,16 @@ private[spark] class CoarseGrainedExecutorBackend(
       context.system.shutdown()
 
       //mv
-    case PushRequest(data) =>
-      logInfo(" %%%%%% receive data %%%%%%")
-      val ser = SparkEnv.get.closureSerializer.newInstance()
-      val shuffleBlockInfo = ser.deserialize[ShuffleBlockInfo](data.value)
-      logInfo("%%%%%% " + shuffleBlockInfo.loc + shuffleBlockInfo.blockSizes(2) + shuffleBlockInfo.shuffleBlockIds(2) + "%%%%%%" )
+//    case PushRequest(data) =>
+//      logInfo(" %%%%%% receive data %%%%%%")
+//      val ser = SparkEnv.get.closureSerializer.newInstance()
+//      val shuffleBlockInfo = ser.deserialize[ShuffleBlockInfo](data.value)
+//      logInfo("%%%%%% " + shuffleBlockInfo.loc + shuffleBlockInfo.blockSizes(2) + shuffleBlockInfo.shuffleBlockIds(2) + "%%%%%%" )
 
 
-    case PreFetchData(msg) =>
-      logInfo("%%%%%% backup msg " + msg + " %%%%%%")
+    case PreFetchData(data) =>
+      logInfo("%%%%%% backup msg " + PreFetchData + " %%%%%%")
+      executor.startPreFetch(this,data.value)
   }
 
   override def statusUpdate(taskId: Long, state: TaskState, data: ByteBuffer) {

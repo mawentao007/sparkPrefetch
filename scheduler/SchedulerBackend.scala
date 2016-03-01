@@ -18,6 +18,7 @@
 package org.apache.spark.scheduler
 
 import org.apache.spark.shuffle.ShuffleBlockInfo
+import org.apache.spark.storage.{BlockManagerId, BlockManager, ShuffleBlockId}
 
 /**
  * A backend interface for scheduling systems that allows plugging in different ones under
@@ -44,7 +45,7 @@ private[spark] trait SchedulerBackend {
   def applicationId(): String = appId
 
   //mv
-  def pushTaskResults(executorId:String,shuffleBlockInfo:ShuffleBlockInfo):Unit
+  def schePreFetch(executorId:BlockManagerId,blockIdAndSize:Array[(ShuffleBlockId,Long)]):Unit
   //--mv
 
 }
