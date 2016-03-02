@@ -178,6 +178,7 @@ private[spark] class TaskSetManager(
    * Add a task to all the pending-task lists that it should be on. If readding is set, we are
    * re-adding the task so only include it in each list if it's not already there.
    */
+  //marvin 这里和preferLoc有关联
   private def addPendingTask(index: Int, readding: Boolean = false) {
     // Utility method that adds `index` to a list only if readding=false or it's not already there
     def addTo(list: ArrayBuffer[Int]) {
@@ -187,6 +188,7 @@ private[spark] class TaskSetManager(
     }
 
     for (loc <- tasks(index).preferredLocations) {
+      //缓存在executor或者hdfs
       loc match {
         case e: ExecutorCacheTaskLocation =>
           addTo(pendingTasksForExecutor.getOrElseUpdate(e.executorId, new ArrayBuffer))

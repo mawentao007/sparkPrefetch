@@ -145,6 +145,8 @@ final class ShuffleBlockFetcherIterator(
     val sizeMap = req.blocks.map { case (blockId, size) => (blockId.toString, size) }.toMap
     val blockIds = req.blocks.map(_._1.toString)
 
+    
+
     val address = req.address
     shuffleClient.fetchBlocks(address.host, address.port, address.executorId, blockIds.toArray,
       new BlockFetchingListener {
@@ -188,11 +190,6 @@ final class ShuffleBlockFetcherIterator(
     // Tracks total number of blocks (including zero sized blocks)
     var totalBlocks = 0
     for ((address, blockInfos) <- blocksByAddress) {
-      //mv
-//      for(x <- blockInfos) {
-//        logInfo("%%%%%%%%%%%%%%%%%%%%%%%%%% " + x._1 + " isShuffle " + x._1.isShuffle + " %%%%%% ")
-//      }
-      //--mv
       totalBlocks += blockInfos.size
       if (address.executorId == blockManager.blockManagerId.executorId) {
         // Filter out zero-sized blocks

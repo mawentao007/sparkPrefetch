@@ -355,9 +355,9 @@ private[spark] class Executor(
               env.blockManager.putBlockData(BlockId(blockId),buf,StorageLevel.DISK_ONLY)
               env.blockManager.getStatus(BlockId(blockId)) match{
                 case Some(s) =>
-                  logInfo("%%%%%% write block " + blockId + " size is " + s.diskSize + " %%%%%%")
+                  //logInfo("%%%%%% write block " + blockId + " size is " + s.diskSize + " %%%%%%")
                 case None =>
-                  logInfo("%%%%%% write block " + blockId + " failed %%%%%%" )
+                  //logInfo("%%%%%% write block " + blockId + " failed %%%%%%" )
               }
 
               buf.release()

@@ -31,6 +31,7 @@ private[spark] class SortShuffleWriter[K, V, C](
     context: TaskContext)
   extends ShuffleWriter[K, V] with Logging {
 
+  //handle就是一个载体，其中的shuffleId就是所属的dependency的shuffleId，而dependency就是所属的dependency。
   private val dep = handle.dependency
 
   private val blockManager = SparkEnv.get.blockManager

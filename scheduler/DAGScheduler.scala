@@ -105,6 +105,8 @@ class DAGScheduler(
    *
    * All accesses to this map should be guarded by synchronizing on it (see SPARK-4454).
    */
+  //rdd.id到位置的映射，其中位置是根据块号作为索引
+  //mv IMPORTANT
   private val cacheLocs = new HashMap[Int, Array[Seq[TaskLocation]]]
 
   // For tracking failed nodes, we use the MapOutputTracker's epoch number, which is sent with
@@ -191,12 +193,20 @@ class DAGScheduler(
 
   private def getCacheLocs(rdd: RDD[_]): Array[Seq[TaskLocation]] = cacheLocs.synchronized {
     // Note: this doesn't use `getOrElse()` because this method is called O(num tasks) times
-    if (!cacheLocs.contains(rdd.id)) {
+    if (!cacheLocs.contains(rdd.id)) {  //这个分支可以忽略，只需要代码添加进去自己调度好的位置即可。
+      //这里的块都是RDDBlockId，应该是多个ShuffleBlockId组合而成的。
       val blockIds = rdd.partitions.indices.map(index => RDDBlockId(rdd.id, index)).toArray[BlockId]
+      //去询问相应的块在哪里
       val locs = BlockManager.blockIdsToBlockManagers(blockIds, env, blockManagerMaster)
       cacheLocs(rdd.id) = blockIds.map { id =>
         locs.getOrElse(id, Nil).map(bm => TaskLocation(bm.host, bm.executorId))
       }
+     /**
+      *  mv 尝试是否可以通过shuffleBlockId找到相应块位置，成功
+      *  val testLoc = BlockManager.blockIdsToBlockManagers(Array(ShuffleBlockId(1,1,1)),env,blockManagerMaster)
+      *  testLoc.foreach(x => logInfo("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&& loc is" + x + " $$$$$$$$$$$%%%%%%"))
+      *  mv
+      */
     }
     cacheLocs(rdd.id)
   }
@@ -204,6 +214,14 @@ class DAGScheduler(
   private def clearCacheLocs(): Unit = cacheLocs.synchronized {
     cacheLocs.clear()
   }
+
+  //mv 写一个方法用来给cacheLocs赋值
+  def setCacheLocs(rdd:RDD[_]) = cacheLocs.synchronized{
+
+  }
+
+  //
+
 
   /**
    * Get or create a shuffle map stage for the given shuffle dependency's map side.
@@ -798,6 +816,8 @@ class DAGScheduler(
     stage.pendingTasks.clear()
 
     // First figure out the indexes of partition ids to compute.
+    //要计算的partitions,这里的计算是说partition已经存在，但是没有对它进行运算，也就是outputLocs还未存在，
+    //没有运算的输出结果。
     val partitionsToCompute: Seq[Int] = {
       if (stage.isShuffleMap) {
         (0 until stage.numPartitions).filter(id => stage.outputLocs(id) == Nil)
@@ -1001,18 +1021,9 @@ class DAGScheduler(
             //mv
             //smt.partitionId就是mapId,还差reducedId,调度得来; stage.numPartitions
 
-            val shuffleId = shuffleToMapStage.find(_._2 == stage) match {
-              case Some((k,v)) => k
-              case None => -1
-            }
-            if(shuffleId == -1){
-              logError("%%%%%% can not find shuffleId for stage " + stage.id + " %%%%%%")
-            }
-            logInfo("%%%%%%% mapstatus blocks num " + status.getBlocksNum + " | mapId " + stage.numPartitions +
-             " | shuffleId " + shuffleId + " %%%%%%")
+            val shuffleId = stage.shuffleDep.get.shuffleId
 
             taskScheduler.preFetchPrepare(shuffleId,smt.partitionId,status)
-            //logInfo("%%%%%% " + status.location.executorId + " $$$ " + task.stageId + " $$$ " + task.preferredLocations.toArray )
             //--mv
             if (failedEpoch.contains(execId) && smt.epoch <= failedEpoch(execId)) {
               logInfo("Ignoring possibly bogus ShuffleMapTask completion from " + execId)
@@ -1338,13 +1349,18 @@ class DAGScheduler(
       return Nil
     }
     // If the partition is cached, return the cache locations
+    //是说这个partition已经缓存在某个节点上，只需要计算即可。可否利用这里进行调度修改？
     val cached = getCacheLocs(rdd)(partition)
     if (!cached.isEmpty) {
+      //logInfo("$$$$$$$$$$$$$$$$$$ rdd " + rdd.id + " partition " + partition + " cached $$$$$$$$$$$$$")
+      //除了最开始的RDD和最后一个RDD，其它的基本上没有缓存的
       return cached
     }
     // If the RDD has some placement preferences (as is the case for input RDDs), get those
     val rddPrefs = rdd.preferredLocations(rdd.partitions(partition)).toList
     if (!rddPrefs.isEmpty) {
+      //logInfo("$$$$$$$$$$$$$$$$$$ rdd " + rdd.id + " prefs "  + " not empty $$$$$$$$$$$$$")
+      //基本都是empty的。
       return rddPrefs.map(TaskLocation(_))
     }
     // If the RDD has narrow dependencies, pick the first partition of the first narrow dep

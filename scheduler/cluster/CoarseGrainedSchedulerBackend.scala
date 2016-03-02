@@ -91,7 +91,6 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
 
     def receiveWithLogging = {
       case RegisterExecutor(executorId, hostPort, cores, logUrls) =>
-        //logInfo("%%%%%%%%%%%% executorId is " + executorId + " %%%%%%%%%%%%")  1,2...
         Utils.checkHostPort(hostPort, "Host port expected " + hostPort)
         if (executorDataMap.contains(executorId)) {
           sender ! RegisterExecutorFailed("Duplicate executor ID: " + executorId)
@@ -168,13 +167,11 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
 
       //mv
       case PreFetchDataInternal(executorId, serializedShuffleBlockInfo) =>
-        logInfo("%%%%%%%%%%%% PreFetchDataInternal %%%%%%%%%")
         try {
           executorDataMap.get(executorId) match {
             case Some(executorData) =>
               //注意一定要用SerializableBuffer!!!
               executorData.executorActor ! PreFetchData(new SerializableBuffer(serializedShuffleBlockInfo))
-              logInfo("%%%%%%%%%%%% datasent %%%%%%%%%")
             case None =>
           }
         } catch {
