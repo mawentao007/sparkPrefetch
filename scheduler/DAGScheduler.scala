@@ -107,6 +107,7 @@ class DAGScheduler(
    */
   //rdd.id到位置的映射，其中位置是根据块号作为索引
   //mv IMPORTANT
+
   private val cacheLocs = new HashMap[Int, Array[Seq[TaskLocation]]]
 
   // For tracking failed nodes, we use the MapOutputTracker's epoch number, which is sent with
@@ -1359,7 +1360,6 @@ class DAGScheduler(
     // If the RDD has some placement preferences (as is the case for input RDDs), get those
     val rddPrefs = rdd.preferredLocations(rdd.partitions(partition)).toList
     if (!rddPrefs.isEmpty) {
-      //logInfo("$$$$$$$$$$$$$$$$$$ rdd " + rdd.id + " prefs "  + " not empty $$$$$$$$$$$$$")
       //基本都是empty的。
       return rddPrefs.map(TaskLocation(_))
     }
@@ -1374,6 +1374,10 @@ class DAGScheduler(
             return locs
           }
         }
+        //mv
+      case s:ShuffleDependency[_,_,_]=>
+        s.shuffleId
+        //mv
       case _ =>
     }
     Nil
