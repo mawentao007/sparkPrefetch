@@ -1352,15 +1352,18 @@ class DAGScheduler(
     // If the partition is cached, return the cache locations
     //是说这个partition已经缓存在某个节点上，只需要计算即可。可否利用这里进行调度修改？
     val cached = getCacheLocs(rdd)(partition)
+
+    /**
+     * 针对当前的sparkRank例子，HadoopRDD实现了这个方法，也就是寻找preferLoc的时候到HadoopRDD会返回结果
+     * 在最开始的时候先通过rdd.preferredLocations找到位置，之后就被缓存
+     */
     if (!cached.isEmpty) {
-      //logInfo("$$$$$$$$$$$$$$$$$$ rdd " + rdd.id + " partition " + partition + " cached $$$$$$$$$$$$$")
-      //除了最开始的RDD和最后一个RDD，其它的基本上没有缓存的
       return cached
     }
     // If the RDD has some placement preferences (as is the case for input RDDs), get those
     val rddPrefs = rdd.preferredLocations(rdd.partitions(partition)).toList
     if (!rddPrefs.isEmpty) {
-      //基本都是empty的。
+      logInfo("%%%%%% rddPrefs not empty " + rdd.name + rdd.id + " %%%%%%")
       return rddPrefs.map(TaskLocation(_))
     }
     // If the RDD has narrow dependencies, pick the first partition of the first narrow dep
@@ -1376,7 +1379,23 @@ class DAGScheduler(
         }
         //mv
       case s:ShuffleDependency[_,_,_]=>
-        s.shuffleId
+        /**
+        * 查看所有map块的位置（理应是同样的），避免第一个块还未到达
+        * val mapTasksNum = s.rdd.partitions.length
+        * val shuffleBlockIds = new Array[BlockId](mapTasksNum)
+        * for(mapTaskId <- 0 to mapTasksNum - 1){
+        * shuffleBlockIds(mapTaskId) = ShuffleBlockId(s.shuffleId,mapTaskId,partition)
+        * }
+        * val locs = BlockManager.blockIdsToBlockManagers(shuffleBlockIds,env,blockManagerMaster)
+        * val taskLocs = shuffleBlockIds.map { id:BlockId =>
+        * locs.getOrElse(id, Nil).map(bm => TaskLocation(bm.host, bm.executorId))}
+         **/
+        val blockId = ShuffleBlockId(s.shuffleId,0,partition)
+        val shuffleBlockIds:Array[BlockId] = Array(blockId)
+        val loc = BlockManager.blockIdsToBlockManagers(shuffleBlockIds,env,blockManagerMaster)
+        val bm = loc.getOrElse(blockId,Nil).head
+        logInfo(" %%%%%% shuffleDependency bm is " + bm + s.rdd.name + s.rdd.id + " %%%%%%")
+        return Seq(TaskLocation(bm.host,bm.executorId))
         //mv
       case _ =>
     }

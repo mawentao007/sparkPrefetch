@@ -497,8 +497,9 @@ private[spark] class BlockManagerInfo(
       }
       if (storageLevel.useDisk) {
         _blocks.put(blockId, BlockStatus(storageLevel, 0, diskSize, 0))
-        logInfo("Added %s on disk on %s (size: %s)".format(
-          blockId, blockManagerId.hostPort, Utils.bytesToString(diskSize)))
+        //mv
+        //logInfo("Added %s on disk on %s (size: %s)".format(
+        //  blockId, blockManagerId.hostPort, Utils.bytesToString(diskSize)))
       }
       if (storageLevel.useOffHeap) {
         _blocks.put(blockId, BlockStatus(storageLevel, 0, 0, tachyonSize))
