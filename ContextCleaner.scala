@@ -54,9 +54,11 @@ private class CleanupTaskWeakReference(
  */
 private[spark] class ContextCleaner(sc: SparkContext) extends Logging {
 
+  //所有需要处理的task
   private val referenceBuffer = new ArrayBuffer[CleanupTaskWeakReference]
     with SynchronizedBuffer[CleanupTaskWeakReference]
 
+  //已经是弱引用的task
   private val referenceQueue = new ReferenceQueue[AnyRef]
 
   private val listeners = new ArrayBuffer[CleanerListener]
@@ -124,7 +126,8 @@ private[spark] class ContextCleaner(sc: SparkContext) extends Logging {
     registerForCleanup(broadcast, CleanBroadcast(broadcast.id))
   }
 
-  /** Register an object for cleanup. */
+  /** Register an object for cleanup.
+    * 因为是若引用，只有当ShuffleDependency为弱引用的时候才会放入队列开始清理*/
   private def registerForCleanup(objectForCleanup: AnyRef, task: CleanupTask) {
     referenceBuffer += new CleanupTaskWeakReference(task, objectForCleanup, referenceQueue)
   }
@@ -133,6 +136,7 @@ private[spark] class ContextCleaner(sc: SparkContext) extends Logging {
   private def keepCleaning(): Unit = Utils.logUncaughtExceptions {
     while (!stopped) {
       try {
+        //从弱引用队列里面取出，并从总任务队列中移除。
         val reference = Option(referenceQueue.remove(ContextCleaner.REF_QUEUE_POLL_TIMEOUT))
           .map(_.asInstanceOf[CleanupTaskWeakReference])
         reference.map(_.task).foreach { task =>

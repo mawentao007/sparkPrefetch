@@ -69,6 +69,7 @@ private[spark] class SortShuffleWriter[K, V, C](
     val partitionLengths = sorter.writePartitionedFile(blockId, context, outputFile)
     shuffleBlockManager.writeIndexFile(dep.shuffleId, mapId, partitionLengths)
 
+    //shuffleServerId可能是其它服务器，也就是把shuffle文件托管到其它服务器
     mapStatus = MapStatus(blockManager.shuffleServerId, partitionLengths)
   }
 

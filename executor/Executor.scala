@@ -352,10 +352,11 @@ private[spark] class Executor(
         new BlockFetchingListener {
           override def onBlockFetchSuccess(blockId: String, buf: ManagedBuffer): Unit = {
               buf.retain()
-              env.blockManager.putBlockData(BlockId(blockId),buf,StorageLevel.DISK_ONLY)
+            //第三个参数可以设定写入磁盘或者内存
+              env.blockManager.putBlockData(BlockId(blockId),buf,StorageLevel.MEMORY_ONLY)
               env.blockManager.getStatus(BlockId(blockId)) match{
                 case Some(s) =>
-                  //logInfo("%%%%%% write block " + blockId + " size is " + s.diskSize + " %%%%%%")
+                  //logInfo("%%%%%% write block " + blockId + " size is " + s.memSize + " %%%%%%")
                 case None =>
                   //logInfo("%%%%%% write block " + blockId + " failed %%%%%%" )
               }

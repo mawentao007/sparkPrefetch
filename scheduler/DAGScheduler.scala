@@ -205,7 +205,6 @@ class DAGScheduler(
      /**
       *  mv 尝试是否可以通过shuffleBlockId找到相应块位置，成功
       *  val testLoc = BlockManager.blockIdsToBlockManagers(Array(ShuffleBlockId(1,1,1)),env,blockManagerMaster)
-      *  testLoc.foreach(x => logInfo("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&& loc is" + x + " $$$$$$$$$$$%%%%%%"))
       *  mv
       */
     }
@@ -1363,7 +1362,6 @@ class DAGScheduler(
     // If the RDD has some placement preferences (as is the case for input RDDs), get those
     val rddPrefs = rdd.preferredLocations(rdd.partitions(partition)).toList
     if (!rddPrefs.isEmpty) {
-      //logInfo("%%%%%% rddPrefs not empty " + rdd.name + rdd.id + " %%%%%%")
       return rddPrefs.map(TaskLocation(_))
     }
     // If the RDD has narrow dependencies, pick the first partition of the first narrow dep
@@ -1381,6 +1379,7 @@ class DAGScheduler(
       /**
        * 在这之前，只要到达ShuffleDependency，就无法继续上溯，则返回的loc为Nil
        * 这种实现有个好处就是只要有一个块prefetch完成，那么调度器就会沿用该规则！
+       * 注意blockManager中updateBlockInfo的问题，旧的块如何删除
        */
       case s:ShuffleDependency[_,_,_]=>
         //查看所有map块的位置（理应是同样的），避免第一个块还未到达
