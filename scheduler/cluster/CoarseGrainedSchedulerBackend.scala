@@ -332,6 +332,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
   //mv
   def schePreFetch(blockManagerId:BlockManagerId,blockIdAndSize:Array[(ShuffleBlockId,Long)]): Unit ={
     val ser = SparkEnv.get.closureSerializer.newInstance()
+    //每个executorId和它要取的数据对应的ShuffleBlockInfo
     val executorIdAndShuffleBlockInfo = new ArrayBuffer[(String,ShuffleBlockInfo)]()
     //这里要去检查系统资源，选出合适的executor
     val blockIds = blockIdAndSize.map(_._1).toArray
@@ -343,8 +344,10 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
     executorIdAndShuffleBlockInfo.append((executorId,new ShuffleBlockInfo(blockManagerId,blockIds,sizes)))
 
     for((eId,sbi) <- executorIdAndShuffleBlockInfo) {
-      val serializedShuffleBlockInfo = ser.serialize[ShuffleBlockInfo](sbi)
-      driverActor ! PreFetchDataInternal(eId, serializedShuffleBlockInfo)
+      if(eId != sbi.loc.executorId) {
+        val serializedShuffleBlockInfo = ser.serialize[ShuffleBlockInfo](sbi)
+        driverActor ! PreFetchDataInternal(eId, serializedShuffleBlockInfo)
+      }
     }
   }
   //--mv
