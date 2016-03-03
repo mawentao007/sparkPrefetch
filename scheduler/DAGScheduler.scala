@@ -1363,7 +1363,7 @@ class DAGScheduler(
     // If the RDD has some placement preferences (as is the case for input RDDs), get those
     val rddPrefs = rdd.preferredLocations(rdd.partitions(partition)).toList
     if (!rddPrefs.isEmpty) {
-      logInfo("%%%%%% rddPrefs not empty " + rdd.name + rdd.id + " %%%%%%")
+      //logInfo("%%%%%% rddPrefs not empty " + rdd.name + rdd.id + " %%%%%%")
       return rddPrefs.map(TaskLocation(_))
     }
     // If the RDD has narrow dependencies, pick the first partition of the first narrow dep
@@ -1378,26 +1378,24 @@ class DAGScheduler(
           }
         }
         //mv
+      /**
+       * 在这之前，只要到达ShuffleDependency，就无法继续上溯，则返回的loc为Nil
+       * 这种实现有个好处就是只要有一个块prefetch完成，那么调度器就会沿用该规则！
+       */
       case s:ShuffleDependency[_,_,_]=>
-        /**
-        * 查看所有map块的位置（理应是同样的），避免第一个块还未到达
-        * val mapTasksNum = s.rdd.partitions.length
-        * val shuffleBlockIds = new Array[BlockId](mapTasksNum)
-        * for(mapTaskId <- 0 to mapTasksNum - 1){
-        * shuffleBlockIds(mapTaskId) = ShuffleBlockId(s.shuffleId,mapTaskId,partition)
-        * }
-        * val locs = BlockManager.blockIdsToBlockManagers(shuffleBlockIds,env,blockManagerMaster)
-        * val taskLocs = shuffleBlockIds.map { id:BlockId =>
-        * locs.getOrElse(id, Nil).map(bm => TaskLocation(bm.host, bm.executorId))}
-         **/
-        val blockId = ShuffleBlockId(s.shuffleId,0,partition)
-        val shuffleBlockIds:Array[BlockId] = Array(blockId)
-        val loc = BlockManager.blockIdsToBlockManagers(shuffleBlockIds,env,blockManagerMaster)
-        val bm = loc.getOrElse(blockId,Nil).head
-        logInfo(" %%%%%% shuffleDependency bm is " + bm + s.rdd.name + s.rdd.id + " %%%%%%")
-        return Seq(TaskLocation(bm.host,bm.executorId))
+        //查看所有map块的位置（理应是同样的），避免第一个块还未到达
+        val mapTasksNum = s.rdd.partitions.length
+        val shuffleBlockIds = new Array[BlockId](mapTasksNum)
+        for(mapTaskId <- 0 to mapTasksNum - 1){
+         shuffleBlockIds(mapTaskId) = ShuffleBlockId(s.shuffleId,mapTaskId,partition)
+        }
+        val locs = BlockManager.blockIdsToBlockManagers(shuffleBlockIds,env,blockManagerMaster)
+        val taskLocs = shuffleBlockIds.map { id:BlockId =>
+        locs.getOrElse(id, Nil).map(bm => TaskLocation(bm.host, bm.executorId))}
+        for(loc <- taskLocs){
+          if(!loc.isEmpty) return loc
+        }
         //mv
-      case _ =>
     }
     Nil
   }
