@@ -521,14 +521,14 @@ private[spark] class TaskSchedulerImpl(
 
   //mv 这里完成块的整理，为下一层的调度做准备工作
   override def preFetchPrepare(shuffleId:Int,mapId:Int,mapStatus:MapStatus): Unit ={
-    val blockIdAndSize = new ArrayBuffer[(ShuffleBlockId,Long)]()
-    val blockNum = mapStatus.getBlocksNum
-    for(reduceId <- 0 to blockNum-1){
-      blockIdAndSize.append((ShuffleBlockId(shuffleId,mapId,reduceId),
-        mapStatus.getSizeForBlock(reduceId)))
-    }
-    val blockManagerId = mapStatus.location
-    backend.schePreFetch(blockManagerId,blockIdAndSize.toArray)
+//    val blockIdAndSize = new ArrayBuffer[(ShuffleBlockId,Long)]()
+//    val blockNum = mapStatus.getBlocksNum
+//    for(reduceId <- 0 to blockNum-1){
+//      blockIdAndSize.append((ShuffleBlockId(shuffleId,mapId,reduceId),
+//        mapStatus.getSizeForBlock(reduceId)))
+//    }
+//    val blockManagerId = mapStatus.location
+    backend.schePreFetch(shuffleId,mapId,mapStatus)
   }
   //--mv
 

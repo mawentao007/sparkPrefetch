@@ -20,8 +20,9 @@ package org.apache.spark.scheduler.cluster
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicInteger
 
+import org.apache.spark.serializer.SerializerInstance
 import org.apache.spark.shuffle.ShuffleBlockInfo
-import org.apache.spark.storage.{BlockManagerId, ShuffleBlockId}
+import org.apache.spark.storage.{BlockId, BlockManagerId, ShuffleBlockId}
 
 import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet}
 import scala.concurrent.Await
@@ -35,6 +36,8 @@ import org.apache.spark.{ExecutorAllocationClient, Logging, SparkEnv, SparkExcep
 import org.apache.spark.scheduler._
 import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages._
 import org.apache.spark.util.{ActorLogReceive, SerializableBuffer, AkkaUtils, Utils}
+
+import scala.util.Random
 
 /**
  * A scheduler backend that waits for coarse grained executors to connect to it through Akka.
@@ -330,26 +333,71 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
   def numExistingExecutors: Int = executorDataMap.size
 
   //mv
-  def schePreFetch(blockManagerId:BlockManagerId,blockIdAndSize:Array[(ShuffleBlockId,Long)]): Unit ={
+  def schePreFetch(shuffleId:Int,mapId:Int,mapStatus:MapStatus): Unit ={
     val ser = SparkEnv.get.closureSerializer.newInstance()
+    schePreTask(shuffleId,mapId,mapStatus,ser)
     //每个executorId和它要取的数据对应的ShuffleBlockInfo
-    val executorIdAndShuffleBlockInfo = new ArrayBuffer[(String,ShuffleBlockInfo)]()
-    //这里要去检查系统资源，选出合适的executor
-    val blockIds = blockIdAndSize.map(_._1).toArray
-    val sizes = blockIdAndSize.map(_._2).toArray
+  }
 
-    //blockManagerId用于指示目标位置，也就是去哪里取数据，是从mapStatus中得到的；
-    //executorId标示这个preFetch指示谁来接受，也就是谁去取，也就是下一个阶段的task的位置，通过调度获取的；
-    val executorId = "1"
-    executorIdAndShuffleBlockInfo.append((executorId,new ShuffleBlockInfo(blockManagerId,blockIds,sizes)))
+  //给每个task预分配位置
+  def schePreTask( shuffleId:Int,mapId:Int,mapStatus:MapStatus,
+                   serializer:SerializerInstance) = {
+    val sourceBlockManagerId = mapStatus.location
+    val reduceTaskNum = mapStatus.getBlocksNum
+    val reduceTasks = (0 until reduceTaskNum).toSet.iterator
 
-    for((eId,sbi) <- executorIdAndShuffleBlockInfo) {
-      if(eId != sbi.loc.executorId) {
-        val serializedShuffleBlockInfo = ser.serialize[ShuffleBlockInfo](sbi)
-        driverActor ! PreFetchDataInternal(eId, serializedShuffleBlockInfo)
+    //取出所有核数可用的executor
+    val executorIdToFreeCores: HashMap[String, Int] = executorDataMap.map {
+      case (id, executorData) => (id, executorData.freeCores)
+    }.filter(_._2 >= scheduler.CPUS_PER_TASK)
+    var availableExecutorIds = Random.shuffle(executorIdToFreeCores.keySet)
+
+    //先把当前节点的空余cpu都用完
+    def tasksOnExecutor(executorId: String) = {
+      val blockIds = new ArrayBuffer[ShuffleBlockId]()
+      val sizes = new ArrayBuffer[Long]()
+      var executorCanHandleTasks: Int =
+        executorIdToFreeCores.getOrElse(executorId,0)/scheduler.CPUS_PER_TASK
+
+      while (executorCanHandleTasks > 0 && reduceTasks.hasNext) {
+        val taskIndex = reduceTasks.next()
+        blockIds.append(ShuffleBlockId(shuffleId, mapId, taskIndex))
+        sizes.append(mapStatus.getSizeForBlock(taskIndex))
+        executorCanHandleTasks -= 1
       }
+
+      blockIds.foreach { x =>
+        logInfo("%%%%%% blocks " +  x + " on " + executorId + " %%%%%%")
+      }
+      sendPreSch(sourceBlockManagerId, executorId, blockIds.toArray, sizes.toArray,serializer)
+      //调度完直接移除
+      availableExecutorIds -= executorId
+    }
+
+
+
+    if(availableExecutorIds.contains(sourceBlockManagerId.executorId)) {
+      tasksOnExecutor(sourceBlockManagerId.executorId)
+    }
+    while (!availableExecutorIds.isEmpty && reduceTasks.hasNext) {
+      val executorId = availableExecutorIds.head
+      tasksOnExecutor(executorId)
     }
   }
+
+
+//将某个executor上的预取任务发送过去
+  def sendPreSch(sourceBlockManagerId:BlockManagerId, destExecutorId:String,
+                 blockIds:Array[ShuffleBlockId],sizes:Array[Long],
+                 serializer:SerializerInstance): Unit ={
+    val serializedShuffleBlockInfo =
+      serializer.serialize[ShuffleBlockInfo](new ShuffleBlockInfo(sourceBlockManagerId,blockIds,sizes))
+    driverActor ! PreFetchDataInternal(destExecutorId, serializedShuffleBlockInfo)
+  }
+
+
+
+  def addPreFetchResult(){}
   //--mv
 
   /**

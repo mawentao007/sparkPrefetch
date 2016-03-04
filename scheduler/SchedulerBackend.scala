@@ -45,7 +45,7 @@ private[spark] trait SchedulerBackend {
   def applicationId(): String = appId
 
   //mv
-  def schePreFetch(executorId:BlockManagerId,blockIdAndSize:Array[(ShuffleBlockId,Long)]):Unit
+  def schePreFetch(shuffleId:Int,mapId:Int,mapStatus:MapStatus):Unit
   //--mv
 
 }

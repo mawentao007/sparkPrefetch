@@ -326,6 +326,10 @@ private[spark] class Executor(
       val targetLoc = shuffleBlockInfo.loc
       val blockIdToSize: Array[(BlockId, Long)] =
         shuffleBlockInfo.shuffleBlockIds.zip(shuffleBlockInfo.blockSizes)
+      blockIdToSize.foreach{x =>
+        logInfo("%%%%%% fetch " + targetLoc.executorId + " " + x._1 + " %%%%%%%" )
+      }
+
       val fetchRequest = buildFetchRequest(targetLoc,blockIdToSize)
       sendRequest(fetchRequest)
     }
