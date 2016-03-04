@@ -316,9 +316,9 @@ private[spark] class Executor(
       serializedShuffleBlockInfo: ByteBuffer)
     extends Runnable {
 
-    private[this] val maxBytesInFlight = SparkEnv.get.conf.getLong("spark.reducer.maxMbInFlight", 48) * 1024 * 1024
+    private[this] val preFetchResult = new LinkedBlockingQueue[BlockId]()
 
-    private[this] val fetchRequests = new Queue[FetchRequest]
+    private[this] val maxBytesInFlight = SparkEnv.get.conf.getLong("spark.reducer.maxMbInFlight", 48) * 1024 * 1024
 
     override def run(): Unit = {
       val ser = env.closureSerializer.newInstance()
@@ -326,9 +326,9 @@ private[spark] class Executor(
       val targetLoc = shuffleBlockInfo.loc
       val blockIdToSize: Array[(BlockId, Long)] =
         shuffleBlockInfo.shuffleBlockIds.zip(shuffleBlockInfo.blockSizes)
-      blockIdToSize.foreach{x =>
+     /* blockIdToSize.foreach{x =>
         logInfo("%%%%%% fetch " + targetLoc.executorId + " " + x._1 + " %%%%%%%" )
-      }
+      }*/
 
       val fetchRequest = buildFetchRequest(targetLoc,blockIdToSize)
       sendRequest(fetchRequest)
@@ -352,33 +352,45 @@ private[spark] class Executor(
       val sizeMap = req.blocks.map { case (blockId, size) => (blockId.toString, size) }.toMap
       val blockIds = req.blocks.map(_._1.toString)
       val address = req.address
+      val blockNum = req.blocks.length
       env.blockManager.shuffleClient.fetchBlocks(address.host, address.port, address.executorId, blockIds.toArray,
         new BlockFetchingListener {
           override def onBlockFetchSuccess(blockId: String, buf: ManagedBuffer): Unit = {
-              buf.retain()
+            buf.retain()
             //第三个参数可以设定写入磁盘或者内存
-              env.blockManager.putBlockData(BlockId(blockId),buf,StorageLevel.MEMORY_ONLY)
-              env.blockManager.getStatus(BlockId(blockId)) match{
-                case Some(s) =>
-                  logInfo("%%%%%% write block " + blockId + " size is " + s.memSize + " %%%%%%")
-                case None =>
-                  logInfo("%%%%%% write block " + blockId + " failed %%%%%%" )
-              }
-
-              buf.release()
+            env.blockManager.putBlockData(BlockId(blockId),buf,StorageLevel.MEMORY_ONLY)
+            //env.blockManager.getStatus(BlockId(blockId)) match{
+//              case Some(s) =>
+//                logInfo("%%%%%% write block " + blockId + " size is " + s.memSize + " %%%%%%")
+//              case None =>
+//                logInfo("%%%%%% write block " + blockId + " failed %%%%%%" )
+            // }
+            preFetchResult.put(BlockId(blockId))
+            if(preFetchResult.size() == blockNum){
+              sendResultBack()
             }
 
+            buf.release()
+          }
+
           override def onBlockFetchFailure(blockId: String, e: Throwable): Unit = {
+            sendResultBack()
             logError(s"Failed to get block(s) from ${req.address.host}:${req.address.port}", e)
           }
         }
       )
     }
 
+    //fetch完成或者出现失败的时候就发送获取结果回去
+    private[this] def sendResultBack() {
+      //这里有个小技巧，直接用toArray()不可行。
+      val preFetchedBlockIds:Array[ShuffleBlockId] = preFetchResult.toArray(new Array[ShuffleBlockId](0))
+      execBackend.preFetchResultUpdate(preFetchedBlockIds)
+    }
+
     case class FetchRequest(address: BlockManagerId, blocks: Seq[(BlockId, Long)]) {
       val size = blocks.map(_._2).sum
     }
-
   }
   //--mv
 

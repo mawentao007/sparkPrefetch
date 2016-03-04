@@ -22,6 +22,8 @@ import java.util.Properties
 import java.util.concurrent.{TimeUnit, Executors}
 import java.util.concurrent.atomic.AtomicInteger
 
+import org.apache.spark.shuffle.PreFetchResultInfo
+
 import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet, Map, Stack}
 import scala.concurrent.Await
 import scala.concurrent.duration._
@@ -214,13 +216,6 @@ class DAGScheduler(
   private def clearCacheLocs(): Unit = cacheLocs.synchronized {
     cacheLocs.clear()
   }
-
-  //mv 写一个方法用来给cacheLocs赋值
-  def setCacheLocs(rdd:RDD[_]) = cacheLocs.synchronized{
-
-  }
-
-  //
 
 
   /**
@@ -1398,6 +1393,12 @@ class DAGScheduler(
     }
     Nil
   }
+
+  //mv
+//  def registerPreFetchResult(result:PreFetchResultInfo): Unit ={
+//
+//  }
+  //--mv
 
   def stop() {
     logInfo("Stopping DAGScheduler")

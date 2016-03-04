@@ -93,5 +93,6 @@ private[spark] object CoarseGrainedClusterMessages {
   //driver与executor之间消息
   case class PushRequest(data:SerializableBuffer) extends CoarseGrainedClusterMessage
   case class PreFetchData(data:SerializableBuffer) extends CoarseGrainedClusterMessage
+  case class PreFetchResult(data:SerializableBuffer)extends CoarseGrainedClusterMessage
 
 }

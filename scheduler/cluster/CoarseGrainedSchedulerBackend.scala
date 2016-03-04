@@ -21,7 +21,7 @@ import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicInteger
 
 import org.apache.spark.serializer.SerializerInstance
-import org.apache.spark.shuffle.ShuffleBlockInfo
+import org.apache.spark.shuffle.{PreFetchResultInfo, ShuffleBlockInfo}
 import org.apache.spark.storage.{BlockId, BlockManagerId, ShuffleBlockId}
 
 import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet}
@@ -32,7 +32,7 @@ import akka.actor._
 import akka.pattern.ask
 import akka.remote.{DisassociatedEvent, RemotingLifecycleEvent}
 
-import org.apache.spark.{ExecutorAllocationClient, Logging, SparkEnv, SparkException, TaskState}
+import org.apache.spark._
 import org.apache.spark.scheduler._
 import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages._
 import org.apache.spark.util.{ActorLogReceive, SerializableBuffer, AkkaUtils, Utils}
@@ -174,16 +174,24 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
           executorDataMap.get(executorId) match {
             case Some(executorData) =>
               //注意一定要用SerializableBuffer!!!
-              executorData.executorActor ! PreFetchData(new SerializableBuffer(serializedShuffleBlockInfo))
+              executorData.executorActor !
+                PreFetchData(new SerializableBuffer(serializedShuffleBlockInfo))
             case None =>
           }
         } catch {
           case e:Exception => logInfo("Some thing wrong")
         }
 
+        //slave 发来的成功预取的消息
+      case PreFetchResult(data) =>
+        val ser = SparkEnv.get.closureSerializer.newInstance()
+        val result = ser.deserialize[PreFetchResultInfo](data.value)
+        val trackerMaster = SparkEnv.get.mapOutputTracker.asInstanceOf[MapOutputTrackerMaster]
+        trackerMaster.updatePreFetchResult(result)
         //--mv
 
     }
+
 
     // Make fake resource offers on all executors
     def makeOffers() {
@@ -366,9 +374,9 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
         executorCanHandleTasks -= 1
       }
 
-      blockIds.foreach { x =>
+     /* blockIds.foreach { x =>
         logInfo("%%%%%% blocks " +  x + " on " + executorId + " %%%%%%")
-      }
+      }*/
       sendPreSch(sourceBlockManagerId, executorId, blockIds.toArray, sizes.toArray,serializer)
       //调度完直接移除
       availableExecutorIds -= executorId

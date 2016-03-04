@@ -20,8 +20,9 @@ package org.apache.spark.executor
 import java.net.URL
 import java.nio.ByteBuffer
 
-import org.apache.spark.shuffle.ShuffleBlockInfo
-import org.apache.spark.storage.{BlockId, BlockManagerId}
+
+import org.apache.spark.shuffle.PreFetchResultInfo
+import org.apache.spark.storage.{BlockManagerId, ShuffleBlockId}
 
 import scala.collection.mutable
 import scala.concurrent.Await
@@ -36,7 +37,7 @@ import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.deploy.worker.WorkerWatcher
 import org.apache.spark.scheduler.TaskDescription
 import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages._
-import org.apache.spark.util.{ActorLogReceive, AkkaUtils, SignalLogger, Utils}
+import org.apache.spark.util._
 
 private[spark] class CoarseGrainedExecutorBackend(
     driverUrl: String,
@@ -121,6 +122,13 @@ private[spark] class CoarseGrainedExecutorBackend(
 
   override def statusUpdate(taskId: Long, state: TaskState, data: ByteBuffer) {
     driver ! StatusUpdate(executorId, taskId, state, data)
+  }
+
+  override def preFetchResultUpdate(preFetchedBlocks:Array[ShuffleBlockId]): Unit ={
+    val ser = env.closureSerializer.newInstance()
+    val result = new PreFetchResultInfo(env.blockManager.blockManagerId,preFetchedBlocks)
+    val serializedResult = ser.serialize(result)
+    driver ! PreFetchResult(new SerializableBuffer(serializedResult))
   }
 }
 

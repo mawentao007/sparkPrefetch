@@ -29,7 +29,7 @@ import akka.actor._
 import akka.pattern.ask
 
 import org.apache.spark.scheduler.MapStatus
-import org.apache.spark.shuffle.MetadataFetchFailedException
+import org.apache.spark.shuffle.{PreFetchResultInfo, MetadataFetchFailedException}
 import org.apache.spark.storage.BlockManagerId
 import org.apache.spark.util._
 
@@ -336,6 +336,10 @@ private[spark] class MapOutputTrackerMaster(conf: SparkConf)
   private def cleanup(cleanupTime: Long) {
     mapStatuses.clearOldValues(cleanupTime)
     cachedSerializedStatuses.clearOldValues(cleanupTime)
+  }
+
+  def updatePreFetchResult(preFetchResult:PreFetchResultInfo): Unit ={
+
   }
 }
 
