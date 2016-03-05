@@ -21,7 +21,7 @@ import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicInteger
 
 import org.apache.spark.serializer.SerializerInstance
-import org.apache.spark.shuffle.{PreFetchResultInfo, ShuffleBlockInfo}
+import org.apache.spark.shuffle.{ShuffleBlockInfo}
 import org.apache.spark.storage.{BlockId, BlockManagerId, ShuffleBlockId}
 
 import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet}
@@ -185,7 +185,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
         //slave 发来的成功预取的消息
       case PreFetchResult(data) =>
         val ser = SparkEnv.get.closureSerializer.newInstance()
-        val result = ser.deserialize[PreFetchResultInfo](data.value)
+        val result:ShuffleBlockInfo = ser.deserialize[ShuffleBlockInfo](data.value)
         val trackerMaster = SparkEnv.get.mapOutputTracker.asInstanceOf[MapOutputTrackerMaster]
         trackerMaster.updatePreFetchResult(result)
         //--mv

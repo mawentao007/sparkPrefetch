@@ -22,7 +22,6 @@ import java.util.Properties
 import java.util.concurrent.{TimeUnit, Executors}
 import java.util.concurrent.atomic.AtomicInteger
 
-import org.apache.spark.shuffle.PreFetchResultInfo
 
 import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet, Map, Stack}
 import scala.concurrent.Await

@@ -27,6 +27,6 @@ import org.apache.spark.storage.ShuffleBlockId
  */
 private[spark] trait ExecutorBackend {
   def statusUpdate(taskId: Long, state: TaskState, data: ByteBuffer)
-  def preFetchResultUpdate(preFetchedBlocks:Array[ShuffleBlockId])
+  def preFetchResultUpdate(preFetchedBlocks:Array[(ShuffleBlockId,Long)])
 }
 

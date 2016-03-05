@@ -89,6 +89,9 @@ private[spark] class TaskSchedulerImpl(
   // Which executor IDs we have executors on
   val activeExecutorIds = new HashSet[String]
 
+  val mapOutputTracker = SparkEnv.get.mapOutputTracker
+
+
   // The set of executors we have on each host; this is used to compute hostsAlive, which
   // in turn is used to decide when we can attain data locality on a given host
   protected val executorsByHost = new HashMap[String, HashSet[String]]

@@ -316,7 +316,7 @@ private[spark] class Executor(
       serializedShuffleBlockInfo: ByteBuffer)
     extends Runnable {
 
-    private[this] val preFetchResult = new LinkedBlockingQueue[BlockId]()
+    private[this] val preFetchResult = new LinkedBlockingQueue[(BlockId,Long)]()
 
     private[this] val maxBytesInFlight = SparkEnv.get.conf.getLong("spark.reducer.maxMbInFlight", 48) * 1024 * 1024
 
@@ -365,7 +365,7 @@ private[spark] class Executor(
 //              case None =>
 //                logInfo("%%%%%% write block " + blockId + " failed %%%%%%" )
             // }
-            preFetchResult.put(BlockId(blockId))
+            preFetchResult.put(BlockId(blockId),sizeMap(blockId))
             if(preFetchResult.size() == blockNum){
               sendResultBack()
             }
@@ -374,7 +374,6 @@ private[spark] class Executor(
           }
 
           override def onBlockFetchFailure(blockId: String, e: Throwable): Unit = {
-            sendResultBack()
             logError(s"Failed to get block(s) from ${req.address.host}:${req.address.port}", e)
           }
         }
@@ -384,8 +383,16 @@ private[spark] class Executor(
     //fetch完成或者出现失败的时候就发送获取结果回去
     private[this] def sendResultBack() {
       //这里有个小技巧，直接用toArray()不可行。
-      val preFetchedBlockIds:Array[ShuffleBlockId] = preFetchResult.toArray(new Array[ShuffleBlockId](0))
-      execBackend.preFetchResultUpdate(preFetchedBlockIds)
+      //val preFetchedBlockIds:Array[ShuffleBlockId] = preFetchResult.toArray(new Array[ShuffleBlockId](0))
+      if(preFetchResult.isEmpty) return
+      val preFetchedBlockIdsAndSize = new ArrayBuffer[(ShuffleBlockId,Long)]()
+      while(!preFetchResult.isEmpty){
+
+        val (blockId,size) = preFetchResult.take()
+        //logInfo(" %%%%%% preFetchResult take() " + blockId + " %%%%%%")
+        preFetchedBlockIdsAndSize.append((blockId.asInstanceOf[ShuffleBlockId],size))
+      }
+      execBackend.preFetchResultUpdate(preFetchedBlockIdsAndSize.toArray)
     }
 
     case class FetchRequest(address: BlockManagerId, blocks: Seq[(BlockId, Long)]) {

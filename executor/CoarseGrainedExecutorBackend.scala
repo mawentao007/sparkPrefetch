@@ -21,7 +21,7 @@ import java.net.URL
 import java.nio.ByteBuffer
 
 
-import org.apache.spark.shuffle.PreFetchResultInfo
+import org.apache.spark.shuffle.{ShuffleBlockInfo}
 import org.apache.spark.storage.{BlockManagerId, ShuffleBlockId}
 
 import scala.collection.mutable
@@ -124,9 +124,11 @@ private[spark] class CoarseGrainedExecutorBackend(
     driver ! StatusUpdate(executorId, taskId, state, data)
   }
 
-  override def preFetchResultUpdate(preFetchedBlocks:Array[ShuffleBlockId]): Unit ={
+  override def preFetchResultUpdate(preFetchedBlocksAndSize:Array[(ShuffleBlockId,Long)]): Unit ={
     val ser = env.closureSerializer.newInstance()
-    val result = new PreFetchResultInfo(env.blockManager.blockManagerId,preFetchedBlocks)
+    val blocks = preFetchedBlocksAndSize.map(_._1)
+    val sizes = preFetchedBlocksAndSize.map(_._2)
+    val result = new ShuffleBlockInfo(env.blockManager.blockManagerId,blocks,sizes)
     val serializedResult = ser.serialize(result)
     driver ! PreFetchResult(new SerializableBuffer(serializedResult))
   }

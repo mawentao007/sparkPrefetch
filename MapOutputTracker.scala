@@ -21,6 +21,7 @@ import java.io._
 import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.{GZIPInputStream, GZIPOutputStream}
 
+import scala.collection.mutable
 import scala.collection.mutable.{HashSet, HashMap, Map}
 import scala.concurrent.Await
 import scala.collection.JavaConversions._
@@ -29,8 +30,8 @@ import akka.actor._
 import akka.pattern.ask
 
 import org.apache.spark.scheduler.MapStatus
-import org.apache.spark.shuffle.{PreFetchResultInfo, MetadataFetchFailedException}
-import org.apache.spark.storage.BlockManagerId
+import org.apache.spark.shuffle.{ShuffleBlockInfo,MetadataFetchFailedException}
+import org.apache.spark.storage.{ShuffleBlockId, BlockManagerId}
 import org.apache.spark.util._
 
 private[spark] sealed trait MapOutputTrackerMessage
@@ -235,6 +236,11 @@ private[spark] class MapOutputTrackerMaster(conf: SparkConf)
    * Other than these two scenarios, nothing should be dropped from this HashMap.
    */
   protected val mapStatuses = new TimeStampedHashMap[Int, Array[MapStatus]]()
+
+  //mv
+  protected val preFetchStatuses = new TimeStampedHashMap[Int,HashMap[Int,ShuffleBlockInfo]]
+  //--mv
+
   private val cachedSerializedStatuses = new TimeStampedHashMap[Int, Array[Byte]]()
 
   // For cleaning up TimeStampedHashMaps
@@ -282,6 +288,9 @@ private[spark] class MapOutputTrackerMaster(conf: SparkConf)
   override def unregisterShuffle(shuffleId: Int) {
     mapStatuses.remove(shuffleId)
     cachedSerializedStatuses.remove(shuffleId)
+    //mv
+    preFetchStatuses.remove(shuffleId)
+    //--mv
   }
 
   /** Check if the given shuffle is being tracked */
@@ -338,9 +347,29 @@ private[spark] class MapOutputTrackerMaster(conf: SparkConf)
     cachedSerializedStatuses.clearOldValues(cleanupTime)
   }
 
-  def updatePreFetchResult(preFetchResult:PreFetchResultInfo): Unit ={
 
+  //mv 注意垃圾回收
+  def updatePreFetchResult(preFetchResult:ShuffleBlockInfo): Unit = {
+    val loc = preFetchResult.loc
+    val shuffleId = preFetchResult.shuffleBlockIds.head.shuffleId
+    val blockIds = preFetchResult.shuffleBlockIds
+    val sizes = preFetchResult.blockSizes
+    val reduceToBlockInfo = blockIds.zip(sizes).groupBy(_._1.reduceId)
+    //先更新内部的reduceId到shuffleBlockInfo的映射，再更新外部映射
+    preFetchStatuses.synchronized {
+      for ((rid, bInfo) <- reduceToBlockInfo) {
+        val hmap = preFetchStatuses.getOrElse(shuffleId, new HashMap[Int, ShuffleBlockInfo])
+        val sInfo = hmap.getOrElse(rid,
+          new ShuffleBlockInfo(loc, Array[ShuffleBlockId](), Array[Long]()))
+        sInfo.shuffleBlockIds ++= bInfo.map(_._1)
+        sInfo.blockSizes ++= bInfo.map(_._2)
+        hmap.update(rid, sInfo)
+        preFetchStatuses.update(shuffleId, hmap)
+        //logInfo("%%%%%% preFetchStatus " + preFetchStatuses(shuffleId)(rid).shuffleBlockIds.map(_.toString) + " %%%%%%")
+      }
+    }
   }
+  //--mv
 }
 
 /**
