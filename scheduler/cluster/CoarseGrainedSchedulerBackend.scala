@@ -69,7 +69,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
     conf.getInt("spark.scheduler.maxRegisteredResourcesWaitingTime", 30000)
   val createTime = System.currentTimeMillis()
 
-  //executor id to data
+  // executor id to data
   private val executorDataMap = new HashMap[String, ExecutorData]
 
   // Number of executors requested from the cluster manager that have not registered yet
@@ -170,12 +170,12 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
       case RetrieveSparkProps =>
         sender ! sparkProperties
 
-      //mv
+      //  mv
       case PreFetchDataInternal(executorId, serializedShuffleBlockInfo) =>
         try {
           executorDataMap.get(executorId) match {
             case Some(executorData) =>
-              //注意一定要用SerializableBuffer!!!
+              //  注意一定要用SerializableBuffer!!!
               executorData.executorActor !
                 PreFetchData(new SerializableBuffer(serializedShuffleBlockInfo))
             case None =>
@@ -184,14 +184,14 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
           case e:Exception => logInfo("Some thing wrong")
         }
 
-        //slave 发来的成功预取的消息
+        //  slave 发来的成功预取的消息
       case PreFetchResult(data) =>
         val ser = SparkEnv.get.closureSerializer.newInstance()
         val result:ShuffleBlockInfo = ser.deserialize[ShuffleBlockInfo](data.value)
         val trackerMaster = SparkEnv.get.mapOutputTracker.asInstanceOf[MapOutputTrackerMaster]
         logInfo("%%%%%% master received preFetch result num " + result.blockSizes.length + " %%%%%%")
         trackerMaster.updatePreFetchResult(result)
-        //--mv
+        //  --mv
 
     }
 
@@ -343,7 +343,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
    */
   def numExistingExecutors: Int = executorDataMap.size
 
-  //mv
+  // mv
   def preSchPrinciple(reduceTaskNum:Int):Array[String] = {
     val schPri = new Array[String](reduceTaskNum)
     val reduceTasks = (0 until reduceTaskNum).toSet.iterator
@@ -371,7 +371,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
       schPri(taskIndex) = executorId
     }
 
-    //HashMap take取出的是map，head取出的是数对
+    // HashMap take取出的是map，head取出的是数对
     while(reduceTasks.hasNext && freeExecutorIdToCores.size > 0 ){
       arrangeFree(freeExecutorIdToCores.head._1)
     }
@@ -393,7 +393,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
       serializer.serialize[ShuffleBlockInfo](new ShuffleBlockInfo(sourceBlockManagerId,blockIds,sizes))
     driverActor ! PreFetchDataInternal(destExecutorId, serializedShuffleBlockInfo)
   }
-  //mv
+  // mv
 
   /**
    * Request an additional number of executors from the cluster manager.

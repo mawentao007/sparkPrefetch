@@ -550,7 +550,9 @@ private[spark] class TaskSchedulerImpl(
     for((executorId,reduceTaskIds) <- exeIdToReduceTasks){
       val blockSizes = reduceTaskIds.map(x => mapStatus.getSizeForBlock(x._2))
       val blockIds = reduceTaskIds.map(x => ShuffleBlockId(shuffleId,mapId,x._2))
-      backend.sendPreFetchInfo(loc,executorId,blockIds,blockSizes)
+      if(loc.executorId != executorId) {
+        backend.sendPreFetchInfo(loc, executorId, blockIds, blockSizes)
+      }
     }
   }
 
