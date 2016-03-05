@@ -18,11 +18,12 @@
 package org.apache.spark
 
 import java.io._
+import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.{GZIPInputStream, GZIPOutputStream}
 
 import scala.collection.mutable
-import scala.collection.mutable.{HashSet, HashMap, Map}
+import scala.collection.mutable.{HashMap, HashSet, Map}
 import scala.concurrent.Await
 import scala.collection.JavaConversions._
 
@@ -37,6 +38,10 @@ import org.apache.spark.util._
 private[spark] sealed trait MapOutputTrackerMessage
 private[spark] case class GetMapOutputStatuses(shuffleId: Int)
   extends MapOutputTrackerMessage
+  //mv
+private[spark] case class GetPreFetchStatuses(shuffleId:Int,reduceId:Int)
+    extends MapOutputTrackerMessage
+  //--mv
 private[spark] case object StopMapOutputTracker extends MapOutputTrackerMessage
 
 /** Actor class for MapOutputTrackerMaster */
@@ -62,6 +67,30 @@ private[spark] class MapOutputTrackerMasterActor(tracker: MapOutputTrackerMaster
         throw exception
       }
       sender ! mapOutputStatuses
+
+      //mv
+    case GetPreFetchStatuses(shuffleId,reduceId)=>
+      val hostPort = sender.path.address.hostPort
+      logInfo("Asked to send map output locations for shuffle " + shuffleId + " to " + hostPort)
+      val preFetchInfo = tracker.getPreFetchInfo(shuffleId,reduceId)
+      val ser = SparkEnv.get.closureSerializer.newInstance()
+      val serializedInfo = ser.serialize(preFetchInfo)
+      val serializedSize = serializedInfo.limit()
+      if (serializedSize > maxAkkaFrameSize) {
+        val msg = s"Map output statuses were $serializedSize bytes which " +
+          s"exceeds spark.akka.frameSize ($maxAkkaFrameSize bytes)."
+
+        /* For SPARK-1244 we'll opt for just logging an error and then throwing an exception.
+         * Note that on exception the actor will just restart. A bigger refactoring (SPARK-1239)
+         * will ultimately remove this entire code path. */
+        val exception = new SparkException(msg)
+        logError(msg, exception)
+        throw exception
+      }
+      sender ! new SerializableBuffer(serializedInfo)
+
+      //--mv
+
 
     case StopMapOutputTracker =>
       logInfo("MapOutputTrackerActor stopped!")
@@ -134,6 +163,7 @@ private[spark] abstract class MapOutputTracker(conf: SparkConf) extends Logging 
    */
   def getServerStatuses(shuffleId: Int, reduceId: Int): Array[(BlockManagerId, Long)] = {
     val statuses = mapStatuses.get(shuffleId).orNull
+    //因为mapStatus包含所有reduce块，因此其它task的fetch结果可以被当前利用
     if (statuses == null) {
       logInfo("Don't have map outputs for shuffle " + shuffleId + ", fetching them")
       var fetchedStatuses: Array[MapStatus] = null
@@ -189,6 +219,17 @@ private[spark] abstract class MapOutputTracker(conf: SparkConf) extends Logging 
     }
   }
 
+  //mv
+  //slave向master端请求结果
+  def getPreFetchStatuses(shuffleId: Int, reduceId: Int): ShuffleBlockInfo = {
+    val ser = SparkEnv.get.closureSerializer.newInstance()
+    val fetchedInfoBytes:SerializableBuffer =
+      askTracker(GetPreFetchStatuses(shuffleId,reduceId)).asInstanceOf[SerializableBuffer]
+    return ser.deserialize[ShuffleBlockInfo](fetchedInfoBytes.value)
+  }
+  //--mv
+
+
   /** Called to get current epoch number. */
   def getEpoch: Long = {
     epochLock.synchronized {
@@ -218,7 +259,9 @@ private[spark] abstract class MapOutputTracker(conf: SparkConf) extends Logging 
 
   /** Stop the tracker. */
   def stop() { }
+
 }
+
 
 /**
  * MapOutputTracker for the driver. This uses TimeStampedHashMap to keep track of map
@@ -290,6 +333,9 @@ private[spark] class MapOutputTrackerMaster(conf: SparkConf)
     cachedSerializedStatuses.remove(shuffleId)
     //mv
     preFetchStatuses.remove(shuffleId)
+    removePreFetchPrinciple(shuffleId)
+
+
     //--mv
   }
 
@@ -304,6 +350,30 @@ private[spark] class MapOutputTrackerMaster(conf: SparkConf)
       logDebug("Increasing epoch to " + epoch)
     }
   }
+
+  //mv 关于预调度的调度规则相关代码
+  private[this] val shuffleIdToPrinciple = new HashMap[Int,Array[String]]
+
+  def getPreFetchPrinciple(shuffleId:Int):Option[Array[String]] = {
+    return shuffleIdToPrinciple.get(shuffleId)
+  }
+
+  def addPreFetchPrinciple(shuffleId:Int,principle:Array[String]): Unit ={
+
+    shuffleIdToPrinciple.synchronized {
+      shuffleIdToPrinciple.put(shuffleId, principle)
+    }
+  }
+
+  def removePreFetchPrinciple(shuffleId:Int): Unit ={
+    shuffleIdToPrinciple.synchronized {
+      if (shuffleIdToPrinciple.contains(shuffleId)) {
+        shuffleIdToPrinciple.remove(shuffleId)
+      }
+    }
+  }
+
+  //--mv
 
   def getSerializedMapOutputStatuses(shuffleId: Int): Array[Byte] = {
     var statuses: Array[MapStatus] = null
@@ -365,11 +435,37 @@ private[spark] class MapOutputTrackerMaster(conf: SparkConf)
         sInfo.blockSizes ++= bInfo.map(_._2)
         hmap.update(rid, sInfo)
         preFetchStatuses.update(shuffleId, hmap)
-        //logInfo("%%%%%% preFetchStatus " + preFetchStatuses(shuffleId)(rid).shuffleBlockIds.map(_.toString) + " %%%%%%")
+
+        preFetchStatuses(shuffleId)(rid).shuffleBlockIds.foreach {
+          case x =>
+          logInfo("%%%%%% preFetchStatuses(shuffleId)(rid).shuffleBlockIds.length "
+            + x.toString + " %%%%%%")
+        }
+
       }
     }
   }
-  //--mv
+
+
+  //master端提取preFetch结果
+  def getPreFetchInfo(shuffleId:Int,reduceId:Int):ShuffleBlockInfo = {
+    preFetchStatuses.synchronized {
+      preFetchStatuses.get(shuffleId) match {
+        case Some(hmap) =>
+          hmap.get(reduceId) match {
+            case Some(sIf) =>
+              logInfo(" %%%%%% getPreFetchInfo " + sIf.blockSizes.length + " %%%%%%")
+              return sIf
+            case _ => return null.asInstanceOf[ShuffleBlockInfo]
+          }
+        case _ => return null.asInstanceOf[ShuffleBlockInfo]
+      }
+    }
+  }
+
+
+
+
 }
 
 /**

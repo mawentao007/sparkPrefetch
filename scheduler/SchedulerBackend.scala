@@ -17,6 +17,7 @@
 
 package org.apache.spark.scheduler
 
+import org.apache.spark.serializer.SerializerInstance
 import org.apache.spark.shuffle.ShuffleBlockInfo
 import org.apache.spark.storage.{BlockManagerId, BlockManager, ShuffleBlockId}
 
@@ -45,7 +46,10 @@ private[spark] trait SchedulerBackend {
   def applicationId(): String = appId
 
   //mv
-  def schePreFetch(shuffleId:Int,mapId:Int,mapStatus:MapStatus):Unit
+  def preSchPrinciple(reduceTaskNum:Int):Array[String]
+  def sendPreFetchInfo(sourceBlockManagerId:BlockManagerId, destExecutorId:String,
+                 blockIds:Array[ShuffleBlockId],sizes:Array[Long]): Unit
+
   //--mv
 
 }

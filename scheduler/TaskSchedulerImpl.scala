@@ -522,15 +522,38 @@ private[spark] class TaskSchedulerImpl(
 
   //mv 这里完成块的整理，为下一层的调度做准备工作
   override def preFetchPrepare(shuffleId:Int,mapId:Int,mapStatus:MapStatus): Unit ={
-//    val blockIdAndSize = new ArrayBuffer[(ShuffleBlockId,Long)]()
-//    val blockNum = mapStatus.getBlocksNum
-//    for(reduceId <- 0 to blockNum-1){
-//      blockIdAndSize.append((ShuffleBlockId(shuffleId,mapId,reduceId),
-//        mapStatus.getSizeForBlock(reduceId)))
-//    }
-//    val blockManagerId = mapStatus.location
-    backend.schePreFetch(shuffleId,mapId,mapStatus)
+    schePreFetch(shuffleId,mapId,mapStatus)
   }
+
+  //mv
+
+  def schePreFetch(shuffleId:Int,mapId:Int,mapStatus:MapStatus): Unit ={
+    val tracker = mapOutputTracker.asInstanceOf[MapOutputTrackerMaster]
+    val principle:Option[Array[String]] =tracker.getPreFetchPrinciple(shuffleId)
+
+    principle.map{
+      case p:Array[String] => sendToExecutor(shuffleId, mapId, mapStatus,p)
+      case _ =>
+        val p  = backend.preSchPrinciple(mapStatus.getBlocksNum)
+        tracker.addPreFetchPrinciple(shuffleId,p)
+        sendToExecutor(shuffleId, mapId, mapStatus,p)
+    }
+  }
+
+
+  //给每个task预分配位置
+  def sendToExecutor( shuffleId:Int,mapId:Int,mapStatus:MapStatus,
+                   principle:Array[String]) = {
+    val ser = SparkEnv.get.closureSerializer.newInstance()
+    val loc = mapStatus.location
+    val exeIdToReduceTasks = principle.zipWithIndex.groupBy(_._1)
+    for((executorId,reduceTaskIds) <- exeIdToReduceTasks){
+      val blockSizes = reduceTaskIds.map(x => mapStatus.getSizeForBlock(x._2))
+      val blockIds = reduceTaskIds.map(x => ShuffleBlockId(shuffleId,mapId,x._2))
+      backend.sendPreFetchInfo(loc,executorId,blockIds,blockSizes)
+    }
+  }
+
   //--mv
 
 }

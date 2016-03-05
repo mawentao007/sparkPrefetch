@@ -24,6 +24,7 @@ import org.apache.spark.serializer.SerializerInstance
 import org.apache.spark.shuffle.{ShuffleBlockInfo}
 import org.apache.spark.storage.{BlockId, BlockManagerId, ShuffleBlockId}
 
+import scala.collection.mutable
 import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet}
 import scala.concurrent.Await
 import scala.concurrent.duration._
@@ -68,6 +69,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
     conf.getInt("spark.scheduler.maxRegisteredResourcesWaitingTime", 30000)
   val createTime = System.currentTimeMillis()
 
+  //executor id to data
   private val executorDataMap = new HashMap[String, ExecutorData]
 
   // Number of executors requested from the cluster manager that have not registered yet
@@ -187,6 +189,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
         val ser = SparkEnv.get.closureSerializer.newInstance()
         val result:ShuffleBlockInfo = ser.deserialize[ShuffleBlockInfo](data.value)
         val trackerMaster = SparkEnv.get.mapOutputTracker.asInstanceOf[MapOutputTrackerMaster]
+        logInfo("%%%%%% master received preFetch result num " + result.blockSizes.length + " %%%%%%")
         trackerMaster.updatePreFetchResult(result)
         //--mv
 
@@ -341,72 +344,56 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
   def numExistingExecutors: Int = executorDataMap.size
 
   //mv
-  def schePreFetch(shuffleId:Int,mapId:Int,mapStatus:MapStatus): Unit ={
-    val ser = SparkEnv.get.closureSerializer.newInstance()
-    schePreTask(shuffleId,mapId,mapStatus,ser)
-    //每个executorId和它要取的数据对应的ShuffleBlockInfo
-  }
-
-  //给每个task预分配位置
-  def schePreTask( shuffleId:Int,mapId:Int,mapStatus:MapStatus,
-                   serializer:SerializerInstance) = {
-    val sourceBlockManagerId = mapStatus.location
-    val reduceTaskNum = mapStatus.getBlocksNum
+  def preSchPrinciple(reduceTaskNum:Int):Array[String] = {
+    val schPri = new Array[String](reduceTaskNum)
     val reduceTasks = (0 until reduceTaskNum).toSet.iterator
 
-    //取出所有核数可用的executor
-    val executorIdToFreeCores: HashMap[String, Int] = executorDataMap.map {
+
+    val freeExecutorIdToCores  = executorDataMap.map {
       case (id, executorData) => (id, executorData.freeCores)
     }.filter(_._2 >= scheduler.CPUS_PER_TASK)
-    var availableExecutorIds = Random.shuffle(executorIdToFreeCores.keySet)
+    val allExecutors = Random.shuffle(executorDataMap.map(_._1)).toArray
 
-    //先把当前节点的空余cpu都用完
-    def tasksOnExecutor(executorId: String) = {
-      val blockIds = new ArrayBuffer[ShuffleBlockId]()
-      val sizes = new ArrayBuffer[Long]()
+    def arrangeFree(executorId:String): Unit ={
       var executorCanHandleTasks: Int =
-        executorIdToFreeCores.getOrElse(executorId,0)/scheduler.CPUS_PER_TASK
+        freeExecutorIdToCores.getOrElse(executorId,0)/scheduler.CPUS_PER_TASK
 
       while (executorCanHandleTasks > 0 && reduceTasks.hasNext) {
         val taskIndex = reduceTasks.next()
-        blockIds.append(ShuffleBlockId(shuffleId, mapId, taskIndex))
-        sizes.append(mapStatus.getSizeForBlock(taskIndex))
+        schPri(taskIndex) = executorId
         executorCanHandleTasks -= 1
       }
-
-     /* blockIds.foreach { x =>
-        logInfo("%%%%%% blocks " +  x + " on " + executorId + " %%%%%%")
-      }*/
-      sendPreSch(sourceBlockManagerId, executorId, blockIds.toArray, sizes.toArray,serializer)
-      //调度完直接移除
-      availableExecutorIds -= executorId
+      freeExecutorIdToCores.remove(executorId)
     }
 
-
-
-    if(availableExecutorIds.contains(sourceBlockManagerId.executorId)) {
-      tasksOnExecutor(sourceBlockManagerId.executorId)
+    def arrangeAll(executorId:String): Unit ={
+      val taskIndex = reduceTasks.next()
+      schPri(taskIndex) = executorId
     }
-    while (!availableExecutorIds.isEmpty && reduceTasks.hasNext) {
-      val executorId = availableExecutorIds.head
-      tasksOnExecutor(executorId)
+
+    //HashMap take取出的是map，head取出的是数对
+    while(reduceTasks.hasNext && freeExecutorIdToCores.size > 0 ){
+      arrangeFree(freeExecutorIdToCores.head._1)
     }
+
+    var index = allExecutors.length-1
+    while(reduceTasks.hasNext){
+      val taskIndex = reduceTasks.next()
+      schPri(taskIndex) = allExecutors(index)
+      index -= 1
+      if(index <= 0) index = allExecutors.length-1
+    }
+    return schPri
   }
 
-
-//将某个executor上的预取任务发送过去
-  def sendPreSch(sourceBlockManagerId:BlockManagerId, destExecutorId:String,
-                 blockIds:Array[ShuffleBlockId],sizes:Array[Long],
-                 serializer:SerializerInstance): Unit ={
+  def sendPreFetchInfo(sourceBlockManagerId:BlockManagerId, destExecutorId:String,
+                 blockIds:Array[ShuffleBlockId],sizes:Array[Long]): Unit ={
+    val serializer = SparkEnv.get.closureSerializer.newInstance()
     val serializedShuffleBlockInfo =
       serializer.serialize[ShuffleBlockInfo](new ShuffleBlockInfo(sourceBlockManagerId,blockIds,sizes))
     driverActor ! PreFetchDataInternal(destExecutorId, serializedShuffleBlockInfo)
   }
-
-
-
-  def addPreFetchResult(){}
-  //--mv
+  //mv
 
   /**
    * Request an additional number of executors from the cluster manager.

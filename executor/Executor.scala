@@ -389,9 +389,10 @@ private[spark] class Executor(
       while(!preFetchResult.isEmpty){
 
         val (blockId,size) = preFetchResult.take()
-        //logInfo(" %%%%%% preFetchResult take() " + blockId + " %%%%%%")
+        logInfo(" %%%%%% preFetchResult take() " + blockId.toString + " %%%%%%")
         preFetchedBlockIdsAndSize.append((blockId.asInstanceOf[ShuffleBlockId],size))
       }
+
       execBackend.preFetchResultUpdate(preFetchedBlockIdsAndSize.toArray)
     }
 

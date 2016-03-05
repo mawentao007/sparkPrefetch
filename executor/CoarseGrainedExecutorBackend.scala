@@ -130,6 +130,7 @@ private[spark] class CoarseGrainedExecutorBackend(
     val sizes = preFetchedBlocksAndSize.map(_._2)
     val result = new ShuffleBlockInfo(env.blockManager.blockManagerId,blocks,sizes)
     val serializedResult = ser.serialize(result)
+    logInfo(" %%%%%% preFetchResult send back ,num blocks " + result.blockSizes.length + "%%%%%%")
     driver ! PreFetchResult(new SerializableBuffer(serializedResult))
   }
 }
