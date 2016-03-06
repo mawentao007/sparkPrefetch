@@ -22,7 +22,7 @@ import java.nio.ByteBuffer
 
 
 import org.apache.spark.shuffle.{ShuffleBlockInfo}
-import org.apache.spark.storage.{BlockManagerId, ShuffleBlockId}
+import org.apache.spark.storage.{BlockId, BlockManagerId, ShuffleBlockId}
 
 import scala.collection.mutable
 import scala.concurrent.Await
@@ -117,6 +117,7 @@ private[spark] class CoarseGrainedExecutorBackend(
 
 
     case PreFetchData(data) =>
+      //logInfo("%%%%%% executor received prefetch message %%%%%%")
       executor.startPreFetch(this,data.value)
   }
 
@@ -124,13 +125,13 @@ private[spark] class CoarseGrainedExecutorBackend(
     driver ! StatusUpdate(executorId, taskId, state, data)
   }
 
-  override def preFetchResultUpdate(preFetchedBlocksAndSize:Array[(ShuffleBlockId,Long)]): Unit ={
+  override def preFetchResultUpdate(preFetchedBlocksAndSize:Array[(BlockId,Long)]): Unit ={
     val ser = env.closureSerializer.newInstance()
     val blocks = preFetchedBlocksAndSize.map(_._1)
     val sizes = preFetchedBlocksAndSize.map(_._2)
     val result = new ShuffleBlockInfo(env.blockManager.blockManagerId,blocks,sizes)
     val serializedResult = ser.serialize(result)
-    logInfo(" %%%%%% preFetchResult send back ,num blocks " + result.blockSizes.length + "%%%%%%")
+    //logInfo(" %%%%%% preFetchResult send back ,num blocks " + result.blockSizes.length + "%%%%%%")
     driver ! PreFetchResult(new SerializableBuffer(serializedResult))
   }
 }

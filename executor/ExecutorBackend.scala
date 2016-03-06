@@ -20,14 +20,13 @@ package org.apache.spark.executor
 import java.nio.ByteBuffer
 
 import org.apache.spark.TaskState.TaskState
-import org.apache.spark.serializer.SerializerInstance
-import org.apache.spark.storage.{BlockManagerId, ShuffleBlockId}
+import org.apache.spark.storage.{BlockId}
 
 /**
  * A pluggable interface used by the Executor to send updates to the cluster scheduler.
  */
 private[spark] trait ExecutorBackend {
   def statusUpdate(taskId: Long, state: TaskState, data: ByteBuffer)
-  def preFetchResultUpdate(preFetchedBlocksAndSize:Array[(ShuffleBlockId,Long)]): Unit
+  def preFetchResultUpdate(preFetchedBlocksAndSize:Array[(BlockId,Long)]): Unit
 }
 

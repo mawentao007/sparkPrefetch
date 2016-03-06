@@ -39,6 +39,7 @@ sealed abstract class BlockId {
   def isRDD = isInstanceOf[RDDBlockId]
   def isShuffle = isInstanceOf[ShuffleBlockId]
   def isBroadcast = isInstanceOf[BroadcastBlockId]
+  def isShufflePre = isInstanceOf[ShufflePreBlockId]
 
   override def toString = name
   override def hashCode = name.hashCode
@@ -58,6 +59,7 @@ case class RDDBlockId(rddId: Int, splitIndex: Int) extends BlockId {
 @DeveloperApi
 case class ShuffleBlockId(shuffleId: Int, mapId: Int, reduceId: Int) extends BlockId {
   def name = "shuffle_" + shuffleId + "_" + mapId + "_" + reduceId
+  def toShufflePreBlockId = ShufflePreBlockId(shuffleId,mapId,reduceId)
 }
 
 @DeveloperApi
@@ -100,12 +102,21 @@ private[spark] case class TestBlockId(id: String) extends BlockId {
   def name = "test_" + id
 }
 
+//mv
+case class ShufflePreBlockId(shuffleId: Int, mapId: Int, reduceId: Int) extends BlockId {
+  def name = "shuffle_" + shuffleId + "_" + mapId + "_" + reduceId + ".pre"
+  def toShuffleBlockId = ShuffleBlockId(shuffleId,mapId,reduceId)
+}
+//--mv
 @DeveloperApi
 object BlockId {
   val RDD = "rdd_([0-9]+)_([0-9]+)".r
   val SHUFFLE = "shuffle_([0-9]+)_([0-9]+)_([0-9]+)".r
   val SHUFFLE_DATA = "shuffle_([0-9]+)_([0-9]+)_([0-9]+).data".r
   val SHUFFLE_INDEX = "shuffle_([0-9]+)_([0-9]+)_([0-9]+).index".r
+  //mv
+  val SHUFFLE_PRE = "shuffle_([0-9]+)_([0-9]+)_([0-9]+).pre".r
+  //--mv
   val BROADCAST = "broadcast_([0-9]+)([_A-Za-z0-9]*)".r
   val TASKRESULT = "taskresult_([0-9]+)".r
   val STREAM = "input-([0-9]+)-([0-9]+)".r
@@ -121,6 +132,10 @@ object BlockId {
       ShuffleDataBlockId(shuffleId.toInt, mapId.toInt, reduceId.toInt)
     case SHUFFLE_INDEX(shuffleId, mapId, reduceId) =>
       ShuffleIndexBlockId(shuffleId.toInt, mapId.toInt, reduceId.toInt)
+    //mv
+    case SHUFFLE_PRE(shuffleId, mapId, reduceId) =>
+      ShufflePreBlockId(shuffleId.toInt, mapId.toInt, reduceId.toInt)
+    //--mv
     case BROADCAST(broadcastId, field) =>
       BroadcastBlockId(broadcastId.toLong, field.stripPrefix("_"))
     case TASKRESULT(taskId) =>
@@ -132,4 +147,20 @@ object BlockId {
     case _ =>
       throw new IllegalStateException("Unrecognized BlockId: " + id)
   }
+
+  //mv
+  def toShufflePreBlockId(id:String) = id match{
+    case SHUFFLE(shuffleId, mapId, reduceId) =>
+      ShufflePreBlockId(shuffleId.toInt, mapId.toInt, reduceId.toInt)
+    case _ =>
+      throw new IllegalStateException("Unrecognized BlockId: " + id)
+  }
+
+  def toShuffleBlockId(id:String) = id match{
+    case SHUFFLE_PRE(shuffleId, mapId, reduceId) =>
+      ShuffleBlockId(shuffleId.toInt, mapId.toInt, reduceId.toInt)
+    case _ =>
+      throw new IllegalStateException("Unrecognized BlockId: " + id)
+  }
+  //--mv
 }

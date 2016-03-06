@@ -17,9 +17,8 @@
 
 package org.apache.spark.scheduler
 
-import org.apache.spark.serializer.SerializerInstance
-import org.apache.spark.shuffle.ShuffleBlockInfo
-import org.apache.spark.storage.{BlockManagerId, BlockManager, ShuffleBlockId}
+
+import org.apache.spark.storage.{BlockId, BlockManagerId}
 
 /**
  * A backend interface for scheduling systems that allows plugging in different ones under
@@ -48,7 +47,7 @@ private[spark] trait SchedulerBackend {
   //mv
   def preSchPrinciple(reduceTaskNum:Int):Array[String]
   def sendPreFetchInfo(sourceBlockManagerId:BlockManagerId, destExecutorId:String,
-                 blockIds:Array[ShuffleBlockId],sizes:Array[Long]): Unit
+                 blockIds:Array[BlockId],sizes:Array[Long]): Unit
 
   //--mv
 

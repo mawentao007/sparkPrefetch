@@ -36,7 +36,7 @@ import org.apache.spark.scheduler.SchedulingMode.SchedulingMode
 import org.apache.spark.scheduler.TaskLocality.TaskLocality
 import org.apache.spark.util.Utils
 import org.apache.spark.executor.TaskMetrics
-import org.apache.spark.storage.{ShuffleBlockId, BlockManagerId}
+import org.apache.spark.storage.{BlockId, ShuffleBlockId, BlockManagerId}
 
 /**
  * Schedules tasks for multiple types of clusters by acting through a SchedulerBackend.
@@ -528,15 +528,19 @@ private[spark] class TaskSchedulerImpl(
   //mv
 
   def schePreFetch(shuffleId:Int,mapId:Int,mapStatus:MapStatus): Unit ={
+    //logInfo("%%%%%% task scheduler [schPreFetch] %%%%%%")
     val tracker = mapOutputTracker.asInstanceOf[MapOutputTrackerMaster]
-    val principle:Option[Array[String]] =tracker.getPreFetchPrinciple(shuffleId)
+    val principle:Array[String] =tracker.getPreFetchPrinciple(shuffleId)
 
-    principle.map{
-      case p:Array[String] => sendToExecutor(shuffleId, mapId, mapStatus,p)
-      case _ =>
+    principle match{
+      case  Array() =>
+        //logInfo("%%%%%% principle is empty %%%%%%")
         val p  = backend.preSchPrinciple(mapStatus.getBlocksNum)
         tracker.addPreFetchPrinciple(shuffleId,p)
         sendToExecutor(shuffleId, mapId, mapStatus,p)
+      case _ =>
+        //logInfo("%%%%%% principle is not empty %%%%%%")
+        sendToExecutor(shuffleId, mapId, mapStatus,principle)
     }
   }
 
@@ -549,7 +553,7 @@ private[spark] class TaskSchedulerImpl(
     val exeIdToReduceTasks = principle.zipWithIndex.groupBy(_._1)
     for((executorId,reduceTaskIds) <- exeIdToReduceTasks){
       val blockSizes = reduceTaskIds.map(x => mapStatus.getSizeForBlock(x._2))
-      val blockIds = reduceTaskIds.map(x => ShuffleBlockId(shuffleId,mapId,x._2))
+      val blockIds:Array[BlockId] = reduceTaskIds.map(x => ShuffleBlockId(shuffleId,mapId,x._2))
       if(loc.executorId != executorId) {
         backend.sendPreFetchInfo(loc, executorId, blockIds, blockSizes)
       }

@@ -189,7 +189,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
         val ser = SparkEnv.get.closureSerializer.newInstance()
         val result:ShuffleBlockInfo = ser.deserialize[ShuffleBlockInfo](data.value)
         val trackerMaster = SparkEnv.get.mapOutputTracker.asInstanceOf[MapOutputTrackerMaster]
-        logInfo("%%%%%% master received preFetch result num " + result.blockSizes.length + " %%%%%%")
+        //logInfo("%%%%%% master received preFetch result num " + result.blockSizes.length + " %%%%%%")
         trackerMaster.updatePreFetchResult(result)
         //  --mv
 
@@ -387,7 +387,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
   }
 
   def sendPreFetchInfo(sourceBlockManagerId:BlockManagerId, destExecutorId:String,
-                 blockIds:Array[ShuffleBlockId],sizes:Array[Long]): Unit ={
+                 blockIds:Array[BlockId],sizes:Array[Long]): Unit ={
     val serializer = SparkEnv.get.closureSerializer.newInstance()
     val serializedShuffleBlockInfo =
       serializer.serialize[ShuffleBlockInfo](new ShuffleBlockInfo(sourceBlockManagerId,blockIds,sizes))

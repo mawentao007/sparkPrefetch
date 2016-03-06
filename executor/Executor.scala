@@ -353,19 +353,25 @@ private[spark] class Executor(
       val blockIds = req.blocks.map(_._1.toString)
       val address = req.address
       val blockNum = req.blocks.length
+      //logInfo("%%%%%% preFetch blockNum is " + blockNum + "%%%%%%")
       env.blockManager.shuffleClient.fetchBlocks(address.host, address.port, address.executorId, blockIds.toArray,
         new BlockFetchingListener {
           override def onBlockFetchSuccess(blockId: String, buf: ManagedBuffer): Unit = {
             buf.retain()
-            //第三个参数可以设定写入磁盘或者内存
-            env.blockManager.putBlockData(BlockId(blockId),buf,StorageLevel.MEMORY_ONLY)
+            /**
+             * 写入的时候存为ShufflePreBlockId，返回服务器的也是这个Id
+             */
+            env.blockManager.putBlockData(
+              BlockId.toShufflePreBlockId(blockId),
+              buf,StorageLevel.DISK_ONLY)
             //env.blockManager.getStatus(BlockId(blockId)) match{
 //              case Some(s) =>
 //                logInfo("%%%%%% write block " + blockId + " size is " + s.memSize + " %%%%%%")
 //              case None =>
 //                logInfo("%%%%%% write block " + blockId + " failed %%%%%%" )
             // }
-            preFetchResult.put(BlockId(blockId),sizeMap(blockId))
+
+            preFetchResult.put(BlockId.toShufflePreBlockId(blockId),sizeMap(blockId))
             if(preFetchResult.size() == blockNum){
               sendResultBack()
             }
@@ -380,17 +386,17 @@ private[spark] class Executor(
       )
     }
 
-    //fetch完成或者出现失败的时候就发送获取结果回去
+    //fetch完成的时候就发送获取结果回去
     private[this] def sendResultBack() {
       //这里有个小技巧，直接用toArray()不可行。
       //val preFetchedBlockIds:Array[ShuffleBlockId] = preFetchResult.toArray(new Array[ShuffleBlockId](0))
       if(preFetchResult.isEmpty) return
-      val preFetchedBlockIdsAndSize = new ArrayBuffer[(ShuffleBlockId,Long)]()
+      val preFetchedBlockIdsAndSize = new ArrayBuffer[(BlockId,Long)]()
       while(!preFetchResult.isEmpty){
 
         val (blockId,size) = preFetchResult.take()
-        logInfo(" %%%%%% preFetchResult take() " + blockId.toString + " %%%%%%")
-        preFetchedBlockIdsAndSize.append((blockId.asInstanceOf[ShuffleBlockId],size))
+        //logInfo(" %%%%%% preFetchResult take() " + blockId.toString + " %%%%%%")
+        preFetchedBlockIdsAndSize.append((blockId,size))
       }
 
       execBackend.preFetchResultUpdate(preFetchedBlockIdsAndSize.toArray)

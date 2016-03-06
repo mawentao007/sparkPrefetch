@@ -32,7 +32,7 @@ import akka.pattern.ask
 
 import org.apache.spark.scheduler.MapStatus
 import org.apache.spark.shuffle.{ShuffleBlockInfo,MetadataFetchFailedException}
-import org.apache.spark.storage.{ShuffleBlockId, BlockManagerId}
+import org.apache.spark.storage.{ShufflePreBlockId, BlockId, ShuffleBlockId, BlockManagerId}
 import org.apache.spark.util._
 
 private[spark] sealed trait MapOutputTrackerMessage
@@ -354,8 +354,8 @@ private[spark] class MapOutputTrackerMaster(conf: SparkConf)
   //mv 关于预调度的调度规则相关代码
   private[this] val shuffleIdToPrinciple = new HashMap[Int,Array[String]]
 
-  def getPreFetchPrinciple(shuffleId:Int):Option[Array[String]] = {
-    return shuffleIdToPrinciple.get(shuffleId)
+  def getPreFetchPrinciple(shuffleId:Int):Array[String] = {
+    return shuffleIdToPrinciple.getOrElse(shuffleId,Array())
   }
 
   def addPreFetchPrinciple(shuffleId:Int,principle:Array[String]): Unit ={
@@ -421,8 +421,9 @@ private[spark] class MapOutputTrackerMaster(conf: SparkConf)
   //mv 注意垃圾回收
   def updatePreFetchResult(preFetchResult:ShuffleBlockInfo): Unit = {
     val loc = preFetchResult.loc
-    val shuffleId = preFetchResult.shuffleBlockIds.head.shuffleId
-    val blockIds = preFetchResult.shuffleBlockIds
+    val shuffleId =
+      preFetchResult.shuffleBlockIds.head.asInstanceOf[ShufflePreBlockId].shuffleId
+    val blockIds = preFetchResult.shuffleBlockIds.map(_.asInstanceOf[ShufflePreBlockId])
     val sizes = preFetchResult.blockSizes
     val reduceToBlockInfo = blockIds.zip(sizes).groupBy(_._1.reduceId)
     //先更新内部的reduceId到shuffleBlockInfo的映射，再更新外部映射
@@ -430,17 +431,17 @@ private[spark] class MapOutputTrackerMaster(conf: SparkConf)
       for ((rid, bInfo) <- reduceToBlockInfo) {
         val hmap = preFetchStatuses.getOrElse(shuffleId, new HashMap[Int, ShuffleBlockInfo])
         val sInfo = hmap.getOrElse(rid,
-          new ShuffleBlockInfo(loc, Array[ShuffleBlockId](), Array[Long]()))
+          new ShuffleBlockInfo(loc, Array[BlockId](), Array[Long]()))
         sInfo.shuffleBlockIds ++= bInfo.map(_._1)
         sInfo.blockSizes ++= bInfo.map(_._2)
         hmap.update(rid, sInfo)
         preFetchStatuses.update(shuffleId, hmap)
 
-        preFetchStatuses(shuffleId)(rid).shuffleBlockIds.foreach {
+       /* preFetchStatuses(shuffleId)(rid).shuffleBlockIds.foreach {
           case x =>
           logInfo("%%%%%% preFetchStatuses(shuffleId)(rid).shuffleBlockIds.length "
             + x.toString + " %%%%%%")
-        }
+        }*/
 
       }
     }
@@ -454,7 +455,7 @@ private[spark] class MapOutputTrackerMaster(conf: SparkConf)
         case Some(hmap) =>
           hmap.get(reduceId) match {
             case Some(sIf) =>
-              logInfo(" %%%%%% getPreFetchInfo " + sIf.blockSizes.length + " %%%%%%")
+              //logInfo(" %%%%%% getPreFetchInfo " + sIf.blockSizes.length + " %%%%%%")
               return sIf
             case _ => return null.asInstanceOf[ShuffleBlockInfo]
           }
