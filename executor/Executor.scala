@@ -340,9 +340,7 @@ private[spark] class Executor(
                                          blockIdToSize: Array[(BlockId, Long)]): FetchRequest = {
       val targetRequestSize = math.max(maxBytesInFlight / 5, 1L)
       logDebug("maxBytesInFlight: " + maxBytesInFlight + ", targetRequestSize: " + targetRequestSize)
-      val totalBlocks = blockIdToSize.length
       val nonEmptyBlockIdToSize = blockIdToSize.filter(_._2 != 0)
-      val totalRequests = nonEmptyBlockIdToSize.length
       val fetchRequest = new FetchRequest(loc, nonEmptyBlockIdToSize)
       fetchRequest
     }

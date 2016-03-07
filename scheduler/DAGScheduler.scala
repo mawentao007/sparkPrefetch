@@ -111,6 +111,11 @@ class DAGScheduler(
 
   private val cacheLocs = new HashMap[Int, Array[Seq[TaskLocation]]]
 
+  /**
+   * 根据设置选择进行preFetch的任务的百分比
+   */
+  private val preFetchPercent = SparkEnv.get.conf.get("spark.preFetchPercent",1.toString)
+
   // For tracking failed nodes, we use the MapOutputTracker's epoch number, which is sent with
   // every task. When we detect a node failing, we note the current epoch number and failed
   // executor, increment it for new tasks, and use this to ignore stray ShuffleMapTask results.
@@ -1012,18 +1017,30 @@ class DAGScheduler(
             val status = event.result.asInstanceOf[MapStatus]
             val execId = status.location.executorId
             logDebug("ShuffleMapTask finished on " + execId)
-            //mv
-            //smt.partitionId就是mapId,还差reducedId,调度得来; stage.numPartitions
 
-            val shuffleId = stage.shuffleDep.get.shuffleId
 
-            taskScheduler.preFetchPrepare(shuffleId,smt.partitionId,status)
-            //--mv
             if (failedEpoch.contains(execId) && smt.epoch <= failedEpoch(execId)) {
               logInfo("Ignoring possibly bogus ShuffleMapTask completion from " + execId)
             } else {
               stage.addOutputLoc(smt.partitionId, status)
             }
+            /**
+             * mv
+             * smt.partitionId就是mapId,还差reducedId,调度得来; stage.numPartitions
+             * 确定当前stage正在执行并且还有其它task在等待，否则当前task就是最后一个，不进行预取。
+             * 进行预取的话会阻碍下一个stage的开始。
+             * 根据百分比选择预取的任务数量，当完成的任务大于这个比例的时候，停止预取，因为预取结果很可能无法被利用。
+             * 这是根据不同数据量和不同任务得到的经验值。在spark-defaults.conf中配置
+             */
+
+            logDebug("%%%%%% preFetchPercent is " + preFetchPercent + " %%%%%%")
+            if(runningStages.contains(stage) &&
+              (stage.pendingTasks.size/stage.numTasks).toDouble > (1.0 - preFetchPercent.toDouble)) {
+              val shuffleId = stage.shuffleDep.get.shuffleId
+              taskScheduler.preFetchPrepare(shuffleId, smt.partitionId, status)
+            }
+
+
             if (runningStages.contains(stage) && stage.pendingTasks.isEmpty) {
               markStageAsFinished(stage)
               logInfo("looking for newly runnable stages")
@@ -1044,6 +1061,10 @@ class DAGScheduler(
                   changeEpoch = true)
               }
               clearCacheLocs()
+
+              /**
+               * 如果某些task未能正确输出结果，要重新提交该stage；否则就提交新的stage
+               */
               if (stage.outputLocs.exists(_ == Nil)) {
                 // Some tasks had failed; let's resubmit this stage
                 // TODO: Lower-level scheduler should also deal with this

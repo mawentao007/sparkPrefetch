@@ -1023,7 +1023,7 @@ private[spark] class BlockManager(
 
         // Drop to disk, if storage level requires
         if (level.useDisk && !diskStore.contains(blockId)) {
-          logInfo(s"Writing block $blockId to disk")
+          //logInfo(s"Writing block $blockId to disk")
           data match {
             case Left(elements) =>
               diskStore.putArray(blockId, elements, level, returnValues = false)

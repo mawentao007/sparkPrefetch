@@ -386,6 +386,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
     return schPri
   }
 
+
   def sendPreFetchInfo(sourceBlockManagerId:BlockManagerId, destExecutorId:String,
                  blockIds:Array[BlockId],sizes:Array[Long]): Unit ={
     val serializer = SparkEnv.get.closureSerializer.newInstance()
