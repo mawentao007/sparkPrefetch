@@ -344,7 +344,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
   def numExistingExecutors: Int = executorDataMap.size
 
   // mv
-  def preSchPrinciple(reduceTaskNum:Int):Array[String] = {
+  def genPrinciple(reduceTaskNum:Int):Array[String] = {
     val schPri = new Array[String](reduceTaskNum)
     val reduceTasks = (0 until reduceTaskNum).toSet.iterator
 

@@ -535,7 +535,7 @@ private[spark] class TaskSchedulerImpl(
     principle match{
       case  Array() =>
         //logInfo("%%%%%% principle is empty %%%%%%")
-        val p  = backend.preSchPrinciple(mapStatus.getBlocksNum)
+        val p  = backend.genPrinciple(mapStatus.getBlocksNum)
         tracker.addPreFetchPrinciple(shuffleId,p)
         sendToExecutor(shuffleId, mapId, mapStatus,p)
       case _ =>

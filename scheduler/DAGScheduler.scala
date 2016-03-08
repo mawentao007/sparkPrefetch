@@ -1033,9 +1033,8 @@ class DAGScheduler(
              * 这是根据不同数据量和不同任务得到的经验值。在spark-defaults.conf中配置
              */
 
-            logDebug("%%%%%% preFetchPercent is " + preFetchPercent + " %%%%%%")
             if(runningStages.contains(stage) &&
-              (stage.pendingTasks.size/stage.numTasks).toDouble > (1.0 - preFetchPercent.toDouble)) {
+              (stage.pendingTasks.size.toDouble/stage.numTasks) > (1.0 - preFetchPercent.toDouble)) {
               val shuffleId = stage.shuffleDep.get.shuffleId
               taskScheduler.preFetchPrepare(shuffleId, smt.partitionId, status)
             }
@@ -1395,19 +1394,24 @@ class DAGScheduler(
        * 在这之前，只要到达ShuffleDependency，就无法继续上溯，则返回的loc为Nil
        * 这种实现有个好处就是只要有一个块prefetch完成，那么调度器就会沿用该规则！
        * 注意blockManager中updateBlockInfo的问题，旧的块如何删除
+       * !!!这里出来一个大bug！因为将预取的块存为了pre，所以之前的根据shuffleBlockId
+       * 找preferLocation的方式应该改为根据shufflePreBlockId！
        */
       case s:ShuffleDependency[_,_,_]=>
         //查看所有map块的位置（理应是同样的），避免第一个块还未到达
         val mapTasksNum = s.rdd.partitions.length
-        val shuffleBlockIds = new Array[BlockId](mapTasksNum)
+        val shufflePreBlockIds = new Array[BlockId](mapTasksNum)
         for(mapTaskId <- 0 to mapTasksNum - 1){
-         shuffleBlockIds(mapTaskId) = ShuffleBlockId(s.shuffleId,mapTaskId,partition)
+         shufflePreBlockIds(mapTaskId) = ShufflePreBlockId(s.shuffleId,mapTaskId,partition)
         }
-        val locs = BlockManager.blockIdsToBlockManagers(shuffleBlockIds,env,blockManagerMaster)
-        val taskLocs = shuffleBlockIds.map { id:BlockId =>
+        val locs = BlockManager.blockIdsToBlockManagers(shufflePreBlockIds,env,blockManagerMaster)
+        val taskLocs = shufflePreBlockIds.map { id:BlockId =>
         locs.getOrElse(id, Nil).map(bm => TaskLocation(bm.host, bm.executorId))}
         for(loc <- taskLocs){
-          if(!loc.isEmpty) return loc
+          if(!loc.isEmpty){
+            logInfo("%%%%%%  getpreferLoc is " + loc.head.host + " %%%%%%" )
+            return loc
+          }
         }
         //mv
     }

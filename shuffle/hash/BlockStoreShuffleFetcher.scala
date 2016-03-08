@@ -81,9 +81,14 @@ private[hash] object BlockStoreShuffleFetcher extends Logging {
 
       //开始更新
       for (((blockId,size), loc) <- allBlockToLoc) {
-        //本地块不更新；非预取块不更新
+        /**
+         * 本地块不更新；非预取块不更新
+         * 先查看mapStatus中的块的位置，如果不是本地，说明块需要从其它executor取来；这时候查看预取的块是否
+         * 包含该块，包含的话就从预取的地方取
+         */
+
         val mapId = blockId.asInstanceOf[ShuffleBlockId].mapId
-        if (loc != blockManagerId && preBlocksToAddress.contains(mapId)) {
+        if (loc.host != blockManagerId.host && preBlocksToAddress.contains(mapId)) {
           updatedBlockToLoc.put((ShufflePreBlockId(shuffleId,mapId,reduceId),size), infoLoc)
         } else {
           updatedBlockToLoc.put((blockId,size), loc)
@@ -94,7 +99,7 @@ private[hash] object BlockStoreShuffleFetcher extends Logging {
         updatedBlockToLoc.toSeq.groupBy(_._2).map{case (a,b) => (a,b.map(_._1))}.toSeq
 
       if(infoLoc == blockManager.blockManagerId){
-        logDebug("%%%%%% preFetch blocks and used is " + info.shuffleBlockIds.length + " %%%%%%")
+        logInfo("%%%%%% preFetch blocks and used is " + info.shuffleBlockIds.length + " %%%%%%")
       }
     }
 
