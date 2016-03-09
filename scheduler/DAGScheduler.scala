@@ -1408,8 +1408,13 @@ class DAGScheduler(
         val locs = BlockManager.blockIdsToBlockManagers(shufflePreBlockIds,env,blockManagerMaster)
         val taskLocs = shufflePreBlockIds.map { id:BlockId =>
         locs.getOrElse(id, Nil).map(bm => TaskLocation(bm.host, bm.executorId))}
-        //mv*/
+        for(loc <- taskLocs){
+          if(!loc.isEmpty){
+            return loc
+          }
+        }*/
       case _ =>
+        //mv
     }
     Nil
   }
