@@ -419,6 +419,11 @@ private[spark] class MapOutputTrackerMaster(conf: SparkConf)
 
 
   //mv 注意垃圾回收
+  /**
+   * 这里很重要的一点就是默认预取的任务属于一个shuffle的分配方式一致，也就是同样reduce task的所有预取块都放到
+   * 一个节点上，如果放在不同节点会出bug，这点在调度的实现的时候要考虑。
+   * @param preFetchResult
+   */
   def updatePreFetchResult(preFetchResult:ShuffleBlockInfo): Unit = {
     val loc = preFetchResult.loc
     val shuffleId =

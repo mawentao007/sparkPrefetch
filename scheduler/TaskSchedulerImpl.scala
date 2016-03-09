@@ -519,17 +519,28 @@ private[spark] class TaskSchedulerImpl(
   override def applicationId(): String = backend.applicationId()
 
 
+  val reduceIdToExecutors = new HashMap[Int,ArrayBuffer[String]]
 
   //mv 这里完成块的整理，为下一层的调度做准备工作
   override def preFetchPrepare(shuffleId:Int,mapId:Int,mapStatus:MapStatus): Unit ={
     schePreFetch(shuffleId,mapId,mapStatus)
   }
 
+  /**
+   * 注意一个问题就是每个shuffle对应的任务如果预取的话必须要放到同一个地方。这里用set出了一个bug，
+   * set在更新的时候内容的顺序不固定，导致一组task被分配到不同地方，而tracker在跟踪预取位置的时候
+   * 默认是放到同一个节点的，所以会出bug。
+   * @param executorId
+   * @param mapId
+   */
+  override def addPrinciple(executorId:String,mapId:Int): Unit ={
+    reduceIdToExecutors.getOrElseUpdate(mapId,ArrayBuffer()) += executorId
+  }
+
   //mv
 
   def schePreFetch(shuffleId:Int,mapId:Int,mapStatus:MapStatus): Unit ={
-    //logInfo("%%%%%% task scheduler [schPreFetch] %%%%%%")
-    val tracker = mapOutputTracker.asInstanceOf[MapOutputTrackerMaster]
+/*    val tracker = mapOutputTracker.asInstanceOf[MapOutputTrackerMaster]
     val principle:Array[String] =tracker.getPreFetchPrinciple(shuffleId)
 
     principle match{
@@ -541,16 +552,27 @@ private[spark] class TaskSchedulerImpl(
       case _ =>
         //logInfo("%%%%%% principle is not empty %%%%%%")
         sendToExecutor(shuffleId, mapId, mapStatus,principle)
+    }*/
+
+    val tasks = mapStatus.getBlocksNum
+    val principle = new Array[String](tasks)
+    for( tid <- 0 to tasks - 1 ){
+      if(reduceIdToExecutors.contains(tid)){
+        principle(tid) = reduceIdToExecutors(tid).head
+      }else{
+        principle(tid) = null
+      }
     }
+    sendToExecutor(shuffleId, mapId, mapStatus,principle)
+
   }
 
 
   //给每个task预分配位置
   def sendToExecutor( shuffleId:Int,mapId:Int,mapStatus:MapStatus,
                    principle:Array[String]) = {
-    val ser = SparkEnv.get.closureSerializer.newInstance()
     val loc = mapStatus.location
-    val exeIdToReduceTasks = principle.zipWithIndex.groupBy(_._1)
+    val exeIdToReduceTasks = principle.zipWithIndex.filter(_._1 != null).groupBy(_._1)
     for((executorId,reduceTaskIds) <- exeIdToReduceTasks){
       val blockSizes = reduceTaskIds.map(x => mapStatus.getSizeForBlock(x._2))
       val blockIds:Array[BlockId] = reduceTaskIds.map(x => ShuffleBlockId(shuffleId,mapId,x._2))

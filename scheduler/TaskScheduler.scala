@@ -76,6 +76,7 @@ private[spark] trait TaskScheduler {
 
   //mv
   def preFetchPrepare(shuffleId:Int,mapId:Int,status:MapStatus):Unit
+  def addPrinciple(executorId:String,mapId:Int)
   //--mv
 
 }

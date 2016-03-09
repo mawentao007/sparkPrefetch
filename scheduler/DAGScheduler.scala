@@ -1032,6 +1032,7 @@ class DAGScheduler(
              * 根据百分比选择预取的任务数量，当完成的任务大于这个比例的时候，停止预取，因为预取结果很可能无法被利用。
              * 这是根据不同数据量和不同任务得到的经验值。在spark-defaults.conf中配置
              */
+            taskScheduler.addPrinciple(status.location.executorId,smt.partitionId)
 
             if(runningStages.contains(stage) &&
               (stage.pendingTasks.size.toDouble/stage.numTasks) > (1.0 - preFetchPercent.toDouble)) {
@@ -1397,7 +1398,7 @@ class DAGScheduler(
        * !!!这里出来一个大bug！因为将预取的块存为了pre，所以之前的根据shuffleBlockId
        * 找preferLocation的方式应该改为根据shufflePreBlockId！
        */
-      case s:ShuffleDependency[_,_,_]=>
+/*      case s:ShuffleDependency[_,_,_]=>
         //查看所有map块的位置（理应是同样的），避免第一个块还未到达
         val mapTasksNum = s.rdd.partitions.length
         val shufflePreBlockIds = new Array[BlockId](mapTasksNum)
@@ -1407,13 +1408,8 @@ class DAGScheduler(
         val locs = BlockManager.blockIdsToBlockManagers(shufflePreBlockIds,env,blockManagerMaster)
         val taskLocs = shufflePreBlockIds.map { id:BlockId =>
         locs.getOrElse(id, Nil).map(bm => TaskLocation(bm.host, bm.executorId))}
-        for(loc <- taskLocs){
-          if(!loc.isEmpty){
-            logInfo("%%%%%%  getpreferLoc is " + loc.head.host + " %%%%%%" )
-            return loc
-          }
-        }
-        //mv
+        //mv*/
+      case _ =>
     }
     Nil
   }
