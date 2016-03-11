@@ -110,15 +110,19 @@ private[spark] class CoarseGrainedExecutorBackend(
       context.stop(self)
       context.system.shutdown()
 
+    case PreFetch(rddId,_,shuffleId,reduceId) =>
+      executor.startPreFetch(this,rddId,shuffleId,reduceId)
+
+
       //mv
 //    case PushRequest(data) =>
 //      val ser = SparkEnv.get.closureSerializer.newInstance()
 //      val shuffleBlockInfo = ser.deserialize[ShuffleBlockInfo](data.value)
 
 
-    case PreFetchData(data) =>
+  /*  case PreFetchData(data) =>
       //logInfo("%%%%%% executor received prefetch message %%%%%%")
-      executor.startPreFetch(this,data.value)
+      executor.startPreFetch(this,data.value)*/
   }
 
   override def statusUpdate(taskId: Long, state: TaskState, data: ByteBuffer) {
@@ -131,7 +135,7 @@ private[spark] class CoarseGrainedExecutorBackend(
     val sizes = preFetchedBlocksAndSize.map(_._2)
     val result = new ShuffleBlockInfo(env.blockManager.blockManagerId,blocks,sizes)
     val serializedResult = ser.serialize(result)
-    //logInfo(" %%%%%% preFetchResult send back ,num blocks " + result.blockSizes.length + "%%%%%%")
+    logInfo(" %%%%%% preFetchResult send back ,num blocks " + result.blockSizes.length)
     driver ! PreFetchResult(new SerializableBuffer(serializedResult))
   }
 }

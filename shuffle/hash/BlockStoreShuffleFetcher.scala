@@ -99,7 +99,7 @@ private[hash] object BlockStoreShuffleFetcher extends Logging {
         updatedBlockToLoc.toSeq.groupBy(_._2).map{case (a,b) => (a,b.map(_._1))}.toSeq
 
       if(infoLoc == blockManager.blockManagerId){
-        logInfo("%%%%%% preFetch blocks and used is " + info.shuffleBlockIds.length + " %%%%%%")
+        logInfo("%%%%%% preFetch blocks and used is " + info.shuffleBlockIds.length)
       }
     }
 

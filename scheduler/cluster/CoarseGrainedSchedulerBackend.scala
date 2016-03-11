@@ -171,7 +171,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
         sender ! sparkProperties
 
       //  mv
-      case PreFetchDataInternal(executorId, serializedShuffleBlockInfo) =>
+/*      case PreFetchDataInternal(executorId, serializedShuffleBlockInfo) =>
         try {
           executorDataMap.get(executorId) match {
             case Some(executorData) =>
@@ -182,15 +182,23 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
           }
         } catch {
           case e:Exception => logInfo("Some thing wrong")
-        }
+        }*/
 
+      case PreFetch(rddId,executorId,shuffleId,reduceId) =>
+        executorDataMap.get(executorId) match {
+          case Some(executorData) =>
+            executorData.executorActor ! PreFetch(rddId,null,shuffleId,reduceId)
+          case None =>
+        }
         //  slave 发来的成功预取的消息
       case PreFetchResult(data) =>
         val ser = SparkEnv.get.closureSerializer.newInstance()
         val result:ShuffleBlockInfo = ser.deserialize[ShuffleBlockInfo](data.value)
         val trackerMaster = SparkEnv.get.mapOutputTracker.asInstanceOf[MapOutputTrackerMaster]
         //logInfo("%%%%%% master received preFetch result num " + result.blockSizes.length + " %%%%%%")
+        makeOffers(result.loc.executorId)
         trackerMaster.updatePreFetchResult(result)
+
         //  --mv
 
     }
@@ -205,9 +213,19 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
 
     // Make fake resource offers on just one executor
     def makeOffers(executorId: String) {
+      /**
+       * hashMap是可变对象，因此对于它的修改是对指针指向的地址的修改
+       * 这里比较两个空余核数量，如果不变说明此次分配失败，没有新任务。
+       */
       val executorData = executorDataMap(executorId)
+      val freeCores = executorData.freeCores
       launchTasks(scheduler.resourceOffers(
         Seq(new WorkerOffer(executorId, executorData.executorHost, executorData.freeCores))))
+      val newFreeCores = executorData.freeCores
+      if(freeCores == newFreeCores){
+        scheduler.launchPreTask(executorId:String)
+      }
+
     }
 
     // Launch tasks returned by a set of resource offers
@@ -344,7 +362,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
   def numExistingExecutors: Int = executorDataMap.size
 
   // mv
-  def genPrinciple(reduceTaskNum:Int):Array[String] = {
+/*  def genPrinciple(reduceTaskNum:Int):Array[String] = {
     val schPri = new Array[String](reduceTaskNum)
     val reduceTasks = (0 until reduceTaskNum).toSet.iterator
 
@@ -393,6 +411,10 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
     val serializedShuffleBlockInfo =
       serializer.serialize[ShuffleBlockInfo](new ShuffleBlockInfo(sourceBlockManagerId,blockIds,sizes))
     driverActor ! PreFetchDataInternal(destExecutorId, serializedShuffleBlockInfo)
+  }*/
+
+  def preFetchData(rddId:Int,eId:String,shuffleId:Int,taskId:Int) = {
+    driverActor ! PreFetch(rddId,eId,shuffleId,taskId)
   }
   // mv
 

@@ -241,6 +241,8 @@ private[spark] abstract class MapOutputTracker(conf: SparkConf) extends Logging 
    * Called from executors to update the epoch number, potentially clearing old outputs
    * because of a fetch failure. Each executor task calls this with the latest epoch
    * number on the driver at the time it was created.
+   * 版本号，记录当前的mapStatus的版本，task到来的时候会带着，如果以前的task失败，新的task会改变这个号，
+   * 那么executor发现不一样就知道之前的mapStatus失效
    */
   def updateEpoch(newEpoch: Long) {
     epochLock.synchronized {
@@ -516,9 +518,13 @@ private[spark] object MapOutputTracker extends Logging {
     statuses.map {
       status =>
         if (status == null) {
-          logError("Missing an output location for shuffle " + shuffleId)
+          /**
+           * 因为提前fetch有一部分status是空的，因此要处理这里，不报错。
+           */
+          /*logError("Missing an output location for shuffle " + shuffleId)
           throw new MetadataFetchFailedException(
-            shuffleId, reduceId, "Missing an output location for shuffle " + shuffleId)
+            shuffleId, reduceId, "Missing an output location for shuffle " + shuffleId)*/
+          (null,0L)
         } else {
           (status.location, status.getSizeForBlock(reduceId))
         }

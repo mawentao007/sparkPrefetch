@@ -88,11 +88,11 @@ private[spark] object CoarseGrainedClusterMessages {
 
   //mv
   //driver端内部消息
-  case class PreFetchDataInternal(executorId:String,serializedShuffleBlockInfo:ByteBuffer)
+ // case class PreFetchDataInternal(executorId:String,serializedShuffleBlockInfo:ByteBuffer)
+//    extends CoarseGrainedClusterMessage
+  case class PreFetch(rddId:Int,executorId:String,shuffleId:Int,reduceId:Int)
     extends CoarseGrainedClusterMessage
   //driver与executor之间消息
-  case class PushRequest(data:SerializableBuffer) extends CoarseGrainedClusterMessage
-  case class PreFetchData(data:SerializableBuffer) extends CoarseGrainedClusterMessage
   case class PreFetchResult(data:SerializableBuffer)extends CoarseGrainedClusterMessage
 
 }

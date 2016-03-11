@@ -200,7 +200,7 @@ class DAGScheduler(
 
   private def getCacheLocs(rdd: RDD[_]): Array[Seq[TaskLocation]] = cacheLocs.synchronized {
     // Note: this doesn't use `getOrElse()` because this method is called O(num tasks) times
-    if (!cacheLocs.contains(rdd.id)) {  //这个分支可以忽略，只需要代码添加进去自己调度好的位置即可。
+    if (!cacheLocs.contains(rdd.id)) {
       //这里的块都是RDDBlockId，应该是多个ShuffleBlockId组合而成的。
       val blockIds = rdd.partitions.indices.map(index => RDDBlockId(rdd.id, index)).toArray[BlockId]
       //去询问相应的块在哪里
@@ -808,6 +808,58 @@ class DAGScheduler(
     }
   }
 
+  /**
+   * 预取的时候因为mapStatus还未注册，因此要将相应shuffleId的mapStatus注册一下方可使用
+   * @param shuffleId
+   */
+
+  def  preRegisterMapStatus(shuffleId:Int) ={
+    runningStages.foreach{
+      case st => if(st.isShuffleMap && st.shuffleDep.get.shuffleId == shuffleId){
+        mapOutputTracker.registerMapOutputs(
+          shuffleId,
+          st.outputLocs.map(list => if (list.isEmpty) null else list.head).toArray,
+          changeEpoch = true)
+      }
+    }
+
+  }
+
+  /**
+   * 返回当前stage之后执行的所有stage，因为当前stage可能是后面stage的parent并且正在执行
+   * 因此需要检查是否在执行的stage队列中
+   * 一个shuffleMapStage对应一个shuffleId
+   * @return
+   * stage和它父stage的shuffleId的组合，之所以需要父stageId是因为父Stage的shuffleId的
+   * 输出才是它需要的
+   */
+  val preWaitingStages =  new HashMap[Stage,Int]()
+  def getPreStage():Set[(Stage,Int)]={
+    def getOneStage(stage:Stage):Option[(Stage,Int)]= {
+      val missingParents = getMissingParentStages(stage)
+      //没有丢失的父stage说明下一个就要执行它了，但是无法获取它要读取的shuffleId，同时
+      //这也说明该stage马上开始，预取意义不大
+      if(missingParents.size == 0) return None
+      missingParents.foreach{
+        case st =>
+          if(!runningStages.contains(st)) return None
+      }
+      return Some(stage,missingParents.head.shuffleDep.get.shuffleId)
+    }
+
+    if(preWaitingStages.size == 0) {
+      for (stage <- waitingStages) {
+        getOneStage(stage) match {
+          case Some((k,v)) =>
+            preWaitingStages.put(k,v)
+          case None =>
+        }
+      }
+    }
+
+    return preWaitingStages.toSet
+  }
+  //--mv
   /** Called when stage's parents are available and we can now do its task. */
   private def submitMissingTasks(stage: Stage, jobId: Int) {
     logDebug("submitMissingTasks(" + stage + ")")
@@ -1033,14 +1085,18 @@ class DAGScheduler(
              * 这是根据不同数据量和不同任务得到的经验值。在spark-defaults.conf中配置
              */
             taskScheduler.addPrinciple(status.location.executorId,smt.partitionId)
-
+/*
             if(runningStages.contains(stage) &&
               (stage.pendingTasks.size.toDouble/stage.numTasks) > (1.0 - preFetchPercent.toDouble)) {
               val shuffleId = stage.shuffleDep.get.shuffleId
               taskScheduler.preFetchPrepare(shuffleId, smt.partitionId, status)
             }
+*/
 
-
+            /**
+             * stage.pendingTasks在task完成时候才修改，我需要在等待队列为空的时候就处理
+             */
+            //--mv
             if (runningStages.contains(stage) && stage.pendingTasks.isEmpty) {
               markStageAsFinished(stage)
               logInfo("looking for newly runnable stages")
@@ -1079,7 +1135,19 @@ class DAGScheduler(
                 }
                 for (stage <- waitingStages if getMissingParentStages(stage) == Nil) {
                   newlyRunnable += stage
+                 
                 }
+
+                //mv
+                preWaitingStages.synchronized {
+                  newlyRunnable.foreach {
+                    case st => if (preWaitingStages.contains(st)) {
+                      preWaitingStages.remove(st)
+                    }
+                  }
+                }
+
+                //--mv
                 waitingStages --= newlyRunnable
                 runningStages ++= newlyRunnable
                 for {
@@ -1398,7 +1466,7 @@ class DAGScheduler(
        * !!!这里出来一个大bug！因为将预取的块存为了pre，所以之前的根据shuffleBlockId
        * 找preferLocation的方式应该改为根据shufflePreBlockId！
        */
-/*      case s:ShuffleDependency[_,_,_]=>
+      case s:ShuffleDependency[_,_,_]=>
         //查看所有map块的位置（理应是同样的），避免第一个块还未到达
         val mapTasksNum = s.rdd.partitions.length
         val shufflePreBlockIds = new Array[BlockId](mapTasksNum)
@@ -1412,7 +1480,7 @@ class DAGScheduler(
           if(!loc.isEmpty){
             return loc
           }
-        }*/
+        }
       case _ =>
         //mv
     }
