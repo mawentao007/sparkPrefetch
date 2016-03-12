@@ -833,9 +833,42 @@ class DAGScheduler(
    * stage和它父stage的shuffleId的组合，之所以需要父stageId是因为父Stage的shuffleId的
    * 输出才是它需要的
    */
-  val preWaitingStages =  new HashMap[Stage,Int]()
-  def getPreStage():Set[(Stage,Int)]={
-    def getOneStage(stage:Stage):Option[(Stage,Int)]= {
+
+  val preTaskSetByStage = new HashMap[Stage,HashSet[(Int,Int,Seq[TaskLocation])]]
+
+  def getOneTask(executorId:String,host:String):Option[(Int,Int)] = {
+    if(preTaskSetByStage.size == 0) {
+      generatePreStage()
+    }
+    val iter = preTaskSetByStage.iterator
+    while(iter.hasNext){
+      val (stage,info) = iter.next()
+      if(info.size == 0){
+          preTaskSetByStage.remove(stage)
+      }else{
+        for((shuffleId,reduceId,locs) <- info){
+          for(loc <- locs){
+            if(loc.isInstanceOf[ExecutorCacheTaskLocation]){
+              if(loc.asInstanceOf[ExecutorCacheTaskLocation].executorId == executorId){
+                info.remove((shuffleId,reduceId,locs))
+                return Some(shuffleId,reduceId)
+              }else if(loc.host == host){
+                info.remove((shuffleId,reduceId,locs))
+                return Some(shuffleId,reduceId)
+              }
+            }
+          }
+        }
+      }
+    }
+    return None
+  }
+
+
+
+
+  def generatePreStage() ={
+    def getOneStage(stage:Stage):Option[(Stage,HashSet[(Int,Int,Seq[TaskLocation])])]={
       val missingParents = getMissingParentStages(stage)
       //没有丢失的父stage说明下一个就要执行它了，但是无法获取它要读取的shuffleId，同时
       //这也说明该stage马上开始，预取意义不大
@@ -844,20 +877,24 @@ class DAGScheduler(
         case st =>
           if(!runningStages.contains(st)) return None
       }
-      return Some(stage,missingParents.head.shuffleDep.get.shuffleId)
+      val shuffleId = missingParents.head.shuffleDep.get.shuffleId
+      val taskInfo = new HashSet[(Int,Int,Seq[TaskLocation])]
+      (0 until stage.numPartitions) foreach {
+        index => taskInfo.add((shuffleId,index,getPreferredLocs(stage.rdd,index)))
+      }
+
+      return Some(stage,taskInfo)
     }
 
-    if(preWaitingStages.size == 0) {
+    if(preTaskSetByStage.size == 0) {
       for (stage <- waitingStages) {
         getOneStage(stage) match {
           case Some((k,v)) =>
-            preWaitingStages.put(k,v)
+            preTaskSetByStage.put(k,v)
           case None =>
         }
       }
     }
-
-    return preWaitingStages.toSet
   }
   //--mv
   /** Called when stage's parents are available and we can now do its task. */
@@ -1139,10 +1176,10 @@ class DAGScheduler(
                 }
 
                 //mv
-                preWaitingStages.synchronized {
+                preTaskSetByStage.synchronized {
                   newlyRunnable.foreach {
-                    case st => if (preWaitingStages.contains(st)) {
-                      preWaitingStages.remove(st)
+                    case st => if (preTaskSetByStage.contains(st)) {
+                      preTaskSetByStage.remove(st)
                     }
                   }
                 }
@@ -1466,7 +1503,7 @@ class DAGScheduler(
        * !!!这里出来一个大bug！因为将预取的块存为了pre，所以之前的根据shuffleBlockId
        * 找preferLocation的方式应该改为根据shufflePreBlockId！
        */
-      case s:ShuffleDependency[_,_,_]=>
+/*      case s:ShuffleDependency[_,_,_]=>
         //查看所有map块的位置（理应是同样的），避免第一个块还未到达
         val mapTasksNum = s.rdd.partitions.length
         val shufflePreBlockIds = new Array[BlockId](mapTasksNum)
@@ -1480,7 +1517,8 @@ class DAGScheduler(
           if(!loc.isEmpty){
             return loc
           }
-        }
+        }*/
+
       case _ =>
         //mv
     }

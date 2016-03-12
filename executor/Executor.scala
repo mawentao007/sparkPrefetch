@@ -304,22 +304,12 @@ private[spark] class Executor(
 
   //mv
 
-/*  def startPreFetch(backend: ExecutorBackend,
-                    serializedShuffleBlockInfo: ByteBuffer): Unit = {
-    //val pr = new PreFetchRunner(context,serializedShuffleBlockInfo)
-    threadPool.execute(pr)
-
-  }*/
-  def startPreFetch( backend: ExecutorBackend, rddId:Int, shuffleId:Int, reduceId:Int)={
+  def startPreFetch( backend: ExecutorBackend,shuffleId:Int, reduceId:Int)={
     val fr = new FetchRunner(backend,shuffleId,reduceId)
     threadPool.execute(fr)
   }
 
-  class FetchRunner(
-                     execBackend: ExecutorBackend,
-                     shuffleId:Int,
-                     reduceId:Int
-                     )
+  class FetchRunner(execBackend: ExecutorBackend, shuffleId:Int, reduceId:Int)
     extends Runnable{
 
     private[this] val maxBytesInFlight = SparkEnv.get.conf.getLong("spark.reducer.maxMbInFlight", 48) * 1024 * 1024
@@ -327,6 +317,9 @@ private[spark] class Executor(
 
     override def run():Unit = {
       val statuses = SparkEnv.get.mapOutputTracker.getServerStatuses(shuffleId, reduceId)
+      //当返回的status为空时，说明新的stage已经开始执行，这次要求预取的是正在执行的status的数据，不存在输出。也就是说这时候的预取可以停止了，
+      //因为没有预取结果所以也不需要通知master。
+      if(statuses.filter(_._1 != null).length == 0)  return
       logInfo("%%%%%% executor get statuses length " + statuses.filter(_._1 != null).length + " shuffleId " + shuffleId)
       val splitsByAddress = new HashMap[BlockManagerId, ArrayBuffer[(Int, Long)]]
       for (((address, size), index) <- statuses.zipWithIndex.filter(_._1._1 != null)) {
@@ -335,12 +328,12 @@ private[spark] class Executor(
 
       val blocksByAddress: Seq[(BlockManagerId, Seq[(BlockId, Long)])] = splitsByAddress.toSeq.map {
         case (address, splits) =>
-          (address, splits.map(s => (ShuffleBlockId(shuffleId, s._1, reduceId), s._2)))
+          (address, splits.filter(_._2 != 0).map(s => (ShuffleBlockId(shuffleId, s._1, reduceId), s._2)))
       }
 
       blocksByAddress.foreach{
         case (address,blocks) =>
-          if(address.host != env.blockManager.blockManagerId.host){
+          if(address.host != env.blockManager.blockManagerId.host && blocks.length != 0){
             val request = buildFetchRequest(address,blocks.toArray)
             sendRequest(request)
           }
@@ -390,7 +383,6 @@ private[spark] class Executor(
 
       //fetch完成的时候就发送获取结果回去
       def sendResultBack() {
-        logInfo("%%%%%% sendResultBack --- result size " + preFetchResult.size())
         //这里有个小技巧，直接用toArray()不可行。
         //val preFetchedBlockIds:Array[ShuffleBlockId] = preFetchResult.toArray(new Array[ShuffleBlockId](0))
         if(preFetchResult.isEmpty) return
@@ -401,8 +393,10 @@ private[spark] class Executor(
           //logInfo(" %%%%%% preFetchResult take() " + blockId.toString + " %%%%%%")
           preFetchedBlockIdsAndSize.append((blockId,size))
         }
+        val tracker = SparkEnv.get.mapOutputTracker.asInstanceOf[MapOutputTrackerWorker]
+        tracker.putPreStatuses(shuffleId,reduceId,preFetchedBlockIdsAndSize.toArray)
 
-        execBackend.preFetchResultUpdate(preFetchedBlockIdsAndSize.toArray)
+        execBackend.preFetchResultUpdate()
       }
     }
 

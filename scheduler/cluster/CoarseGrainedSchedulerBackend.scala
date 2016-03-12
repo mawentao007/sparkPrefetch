@@ -184,20 +184,20 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
           case e:Exception => logInfo("Some thing wrong")
         }*/
 
-      case PreFetch(rddId,executorId,shuffleId,reduceId) =>
+      case PreFetch(executorId,shuffleId,reduceId) =>
         executorDataMap.get(executorId) match {
           case Some(executorData) =>
-            executorData.executorActor ! PreFetch(rddId,null,shuffleId,reduceId)
+            executorData.executorActor ! PreFetch(null,shuffleId,reduceId)
           case None =>
         }
         //  slave 发来的成功预取的消息
-      case PreFetchResult(data) =>
-        val ser = SparkEnv.get.closureSerializer.newInstance()
-        val result:ShuffleBlockInfo = ser.deserialize[ShuffleBlockInfo](data.value)
-        val trackerMaster = SparkEnv.get.mapOutputTracker.asInstanceOf[MapOutputTrackerMaster]
-        //logInfo("%%%%%% master received preFetch result num " + result.blockSizes.length + " %%%%%%")
-        makeOffers(result.loc.executorId)
-        trackerMaster.updatePreFetchResult(result)
+      case PreFetchFinished(executorId) =>
+//        val ser = SparkEnv.get.closureSerializer.newInstance()
+//        val result:ShuffleBlockInfo = ser.deserialize[ShuffleBlockInfo](data.value)
+//        val trackerMaster = SparkEnv.get.mapOutputTracker.asInstanceOf[MapOutputTrackerMaster]
+//        //logInfo("%%%%%% master received preFetch result num " + result.blockSizes.length + " %%%%%%")
+        makeOffers(executorId)
+
 
         //  --mv
 
@@ -413,8 +413,8 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
     driverActor ! PreFetchDataInternal(destExecutorId, serializedShuffleBlockInfo)
   }*/
 
-  def preFetchData(rddId:Int,eId:String,shuffleId:Int,taskId:Int) = {
-    driverActor ! PreFetch(rddId,eId,shuffleId,taskId)
+  def preFetchData(eId:String,shuffleId:Int,taskId:Int) = {
+    driverActor ! PreFetch(eId,shuffleId,taskId)
   }
   // mv
 

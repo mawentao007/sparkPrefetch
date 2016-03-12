@@ -27,6 +27,6 @@ import org.apache.spark.storage.{BlockId}
  */
 private[spark] trait ExecutorBackend {
   def statusUpdate(taskId: Long, state: TaskState, data: ByteBuffer)
-  def preFetchResultUpdate(preFetchedBlocksAndSize:Array[(BlockId,Long)]): Unit
+  def preFetchResultUpdate(): Unit
 }
 

@@ -532,7 +532,7 @@ private[spark] class TaskSchedulerImpl(
    * @param mapId
    */
   override def addPrinciple(executorId:String,mapId:Int): Unit ={
-    reduceIdToExecutors.getOrElseUpdate(mapId,executorId)
+    reduceIdToExecutors.update(mapId,executorId)
   }
 
   //mv
@@ -585,9 +585,26 @@ private[spark] class TaskSchedulerImpl(
    * 恰好新的stage刚刚加入running队列，因此waiting和running队列都得到更新，这时候再预取是没有结果的。
    * 这种情况mapStatus就是0.
    */
+
+  val registerdShuffleId = new HashSet[Int]
+  def launchPreTask(executorId:String): Unit ={
+    val host = executorIdToHost(executorId)
+    dagScheduler.getOneTask(executorId,host) match{
+      case Some((shuffleId,reduceId)) =>
+        if(!registerdShuffleId.contains(shuffleId)){
+          dagScheduler.preRegisterMapStatus(shuffleId)
+          registerdShuffleId.add(shuffleId)
+        }
+        logInfo("%%%%%% preFetch for" + " shuffleId "+shuffleId+" executor "+executorId+"taskId "+reduceId)
+        backend.preFetchData(executorId, shuffleId, reduceId)
+      case None =>
+        logInfo(" %%%%%% pre schedule failed")
+    }
+  }
+/*
   val preTasksByShuffleId = new HashMap[Int,HashSet[Int]]
 
-  def launchPreTask(executorId: String): Unit = {
+  def launchPreTask(executorId: String) = {
     val stages = dagScheduler.getPreStage()
     val iter = stages.iterator
     while (iter.hasNext) {
@@ -604,7 +621,7 @@ private[spark] class TaskSchedulerImpl(
               HashSet[Int]()
           }
 
-        for (taskId <- 0 to taskNum - 1) {
+        for (taskId <- 0 to taskNum  1) {
           if (!finishPreSet.contains(taskId)) {
             reduceIdToExecutors.get(taskId) match {
               case Some(eId) =>
@@ -613,7 +630,6 @@ private[spark] class TaskSchedulerImpl(
                   finishPreSet.add(taskId)
                   preTasksByShuffleId.update(shuffleId,finishPreSet)
                   backend.preFetchData(stage.rdd.id, eId, shuffleId, taskId)
-                  return
                 }
               case _ =>
             }
@@ -622,6 +638,7 @@ private[spark] class TaskSchedulerImpl(
       }
     }
   }
+*/
 
   //--mv
 

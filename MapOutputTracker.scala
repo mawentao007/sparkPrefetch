@@ -124,6 +124,8 @@ private[spark] abstract class MapOutputTracker(conf: SparkConf) extends Logging 
    */
   protected val mapStatuses: Map[Int, Array[MapStatus]]
 
+
+
   /**
    * Incremented every time a fetch fails so that client nodes know to clear
    * their cache of map output locations if this happens.
@@ -221,12 +223,12 @@ private[spark] abstract class MapOutputTracker(conf: SparkConf) extends Logging 
 
   //mv
   //slave向master端请求结果
-  def getPreFetchStatuses(shuffleId: Int, reduceId: Int): ShuffleBlockInfo = {
+/*  def getPreFetchStatuses(shuffleId: Int, reduceId: Int): ShuffleBlockInfo = {
     val ser = SparkEnv.get.closureSerializer.newInstance()
     val fetchedInfoBytes:SerializableBuffer =
       askTracker(GetPreFetchStatuses(shuffleId,reduceId)).asInstanceOf[SerializableBuffer]
     return ser.deserialize[ShuffleBlockInfo](fetchedInfoBytes.value)
-  }
+  }*/
   //--mv
 
 
@@ -483,6 +485,32 @@ private[spark] class MapOutputTrackerMaster(conf: SparkConf)
 private[spark] class MapOutputTrackerWorker(conf: SparkConf) extends MapOutputTracker(conf) {
   protected val mapStatuses: Map[Int, Array[MapStatus]] =
     new ConcurrentHashMap[Int, Array[MapStatus]]
+
+  //mv
+
+  val preStatuses = new HashMap[Int,Map[Int,Array[(BlockId,Long)]]]
+
+  def getPreStatuses(shuffleId: Int, reduceId: Int):Array[(BlockId,Long)]  = {
+    preStatuses.get(shuffleId) match{
+      case Some(map) => map.get(reduceId) match{
+        case Some(array) => return array
+        case _ => return Array()
+      }
+      case _ => Array()
+    }
+  }
+
+  def putPreStatuses(shuffleId:Int,reduceId:Int,result:Array[(BlockId,Long)]) = {
+    preStatuses.get(shuffleId) match{
+      case Some(map) => map.put(reduceId,result)
+      case _ => val map = Map(reduceId->result)
+        preStatuses.put(shuffleId,map)
+    }
+  }
+
+
+
+  //--mv
 }
 
 private[spark] object MapOutputTracker extends Logging {
@@ -506,6 +534,8 @@ private[spark] object MapOutputTracker extends Logging {
     val objIn = new ObjectInputStream(new GZIPInputStream(new ByteArrayInputStream(bytes)))
     objIn.readObject().asInstanceOf[Array[MapStatus]]
   }
+
+
 
   // Convert an array of MapStatuses to locations and sizes for a given reduce ID. If
   // any of the statuses is null (indicating a missing location due to a failed mapper),

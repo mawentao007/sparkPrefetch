@@ -19,7 +19,7 @@
 package org.apache.spark.shuffle.hash
 
 
-import scala.collection.mutable.HashMap
+import scala.collection.mutable.{HashMap,HashSet}
 import scala.util.{Failure, Success, Try}
 
 import org.apache.spark._
@@ -47,7 +47,10 @@ private[hash] object BlockStoreShuffleFetcher extends Logging {
     val startTime = System.currentTimeMillis
 
     val statuses = SparkEnv.get.mapOutputTracker.getServerStatuses(shuffleId, reduceId)
-    val info = SparkEnv.get.mapOutputTracker.getPreFetchStatuses(shuffleId,reduceId)
+
+    //修改后之查看本地是否预取，不再考虑其它节点的预取
+    val info =
+      SparkEnv.get.mapOutputTracker.asInstanceOf[MapOutputTrackerWorker].getPreStatuses(shuffleId,reduceId)
     
     logDebug("Fetching map output location for shuffle %d, reduce %d took %d ms".format(
       shuffleId, reduceId, System.currentTimeMillis - startTime))
@@ -62,34 +65,20 @@ private[hash] object BlockStoreShuffleFetcher extends Logging {
 
 
     //info等于空的话不用更新
-    if(info != null) {
+    if(info.length != 0) {
       val updatedBlockToLoc = new HashMap[(BlockId, Long), BlockManagerId]
 
-        /**
-         *  pre所有块到地址的映射
-         *  pre块和shuffle块不一样，因此需要进行一次转换才能进行比较
-         *  为了处理方便，用mapId做索引检索preFetch结果即可
-         */
-      val infoLoc = info.loc
-      val preBlocksToAddress = new HashMap[Int, BlockManagerId]
-      for ((block, size) <- info.shuffleBlockIds.zip(info.blockSizes)) {
-        preBlocksToAddress.put(block.asInstanceOf[ShufflePreBlockId].mapId, infoLoc)
+      val preBlocksMapId = new HashSet[Int]
+      for((preBlockId,size) <- info){
+        preBlocksMapId.add(preBlockId.asInstanceOf[ShufflePreBlockId].mapId)
       }
-
-
 
 
       //开始更新
       for (((blockId,size), loc) <- allBlockToLoc) {
-        /**
-         * 本地块不更新；非预取块不更新
-         * 先查看mapStatus中的块的位置，如果不是本地，说明块需要从其它executor取来；这时候查看预取的块是否
-         * 包含该块，包含的话就从预取的地方取
-         */
-
         val mapId = blockId.asInstanceOf[ShuffleBlockId].mapId
-        if (loc.host != blockManagerId.host && preBlocksToAddress.contains(mapId)) {
-          updatedBlockToLoc.put((ShufflePreBlockId(shuffleId,mapId,reduceId),size), infoLoc)
+        if (loc.host != blockManagerId.host && preBlocksMapId.contains(mapId)) {
+          updatedBlockToLoc.put((ShufflePreBlockId(shuffleId,mapId,reduceId),size),blockManagerId)
         } else {
           updatedBlockToLoc.put((blockId,size), loc)
         }
@@ -97,10 +86,8 @@ private[hash] object BlockStoreShuffleFetcher extends Logging {
 
       blocksByAddress =
         updatedBlockToLoc.toSeq.groupBy(_._2).map{case (a,b) => (a,b.map(_._1))}.toSeq
+      logInfo("%%%%%% preFetch blocks and used is " + info.length)
 
-      if(infoLoc == blockManager.blockManagerId){
-        logInfo("%%%%%% preFetch blocks and used is " + info.shuffleBlockIds.length)
-      }
     }
 
 
@@ -117,7 +104,7 @@ private[hash] object BlockStoreShuffleFetcher extends Logging {
               val address = statuses(mapId.toInt)._1
               throw new FetchFailedException(address, shufId.toInt, mapId.toInt, reduceId, e)
             case ShufflePreBlockId(shufId, mapId, _) =>
-              val address = info.loc
+              val address = blockManagerId
               throw new FetchFailedException(address, shufId.toInt, mapId.toInt, reduceId, e)
             case _ =>
               throw new SparkException(
