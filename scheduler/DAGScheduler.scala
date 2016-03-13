@@ -841,23 +841,24 @@ class DAGScheduler(
       generatePreStage()
     }
     val iter = preTaskSetByStage.iterator
-    while(iter.hasNext){
-      val (stage,info) = iter.next()
-      if(info.size == 0){
-          preTaskSetByStage.remove(stage)
-      }else{
-        for((shuffleId,reduceId,locs) <- info){
-          for(loc <- locs){
-            if(loc.isInstanceOf[ExecutorCacheTaskLocation]){
-              if(loc.asInstanceOf[ExecutorCacheTaskLocation].executorId == executorId){
-                info.remove((shuffleId,reduceId,locs))
-                return Some(shuffleId,reduceId)
+    while (iter.hasNext) {
+      val (stage, info) = iter.next()
+      if (info.size == 0) {
+        preTaskSetByStage.remove(stage)
+      } else {
+        for ((shuffleId, reduceId, locs) <- info) {
+          for (loc <- locs) {
+            if (loc.isInstanceOf[ExecutorCacheTaskLocation]) {
+              if (loc.asInstanceOf[ExecutorCacheTaskLocation].executorId == executorId) {
+                info.remove((shuffleId, reduceId, locs))
+                return Some(shuffleId, reduceId)
               }
             }
           }
         }
       }
     }
+
     return None
   }
 
