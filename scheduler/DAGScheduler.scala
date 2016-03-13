@@ -852,9 +852,6 @@ class DAGScheduler(
               if(loc.asInstanceOf[ExecutorCacheTaskLocation].executorId == executorId){
                 info.remove((shuffleId,reduceId,locs))
                 return Some(shuffleId,reduceId)
-              }else if(loc.host == host){
-                info.remove((shuffleId,reduceId,locs))
-                return Some(shuffleId,reduceId)
               }
             }
           }
