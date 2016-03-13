@@ -69,30 +69,7 @@ private[spark] class MapOutputTrackerMasterActor(tracker: MapOutputTrackerMaster
         throw exception
       }
       sender ! mapOutputStatuses
-
-      //mv
-    case GetPreFetchStatuses(shuffleId,reduceId)=>
-      val hostPort = sender.path.address.hostPort
-      logInfo("Asked to send map output locations for shuffle " + shuffleId + " to " + hostPort)
-      val preFetchInfo = tracker.getPreFetchInfo(shuffleId,reduceId)
-      val ser = SparkEnv.get.closureSerializer.newInstance()
-      val serializedInfo = ser.serialize(preFetchInfo)
-      val serializedSize = serializedInfo.limit()
-      if (serializedSize > maxAkkaFrameSize) {
-        val msg = s"Map output statuses were $serializedSize bytes which " +
-          s"exceeds spark.akka.frameSize ($maxAkkaFrameSize bytes)."
-
-        /* For SPARK-1244 we'll opt for just logging an error and then throwing an exception.
-         * Note that on exception the actor will just restart. A bigger refactoring (SPARK-1239)
-         * will ultimately remove this entire code path. */
-        val exception = new SparkException(msg)
-        logError(msg, exception)
-        throw exception
-      }
-      sender ! new SerializableBuffer(serializedInfo)
-
-      //--mv
-
+      
 
     case StopMapOutputTracker =>
       logInfo("MapOutputTrackerActor stopped!")
@@ -223,15 +200,7 @@ private[spark] abstract class MapOutputTracker(conf: SparkConf) extends Logging 
     }
   }
 
-  //mv
-  //slave向master端请求结果
-/*  def getPreFetchStatuses(shuffleId: Int, reduceId: Int): ShuffleBlockInfo = {
-    val ser = SparkEnv.get.closureSerializer.newInstance()
-    val fetchedInfoBytes:SerializableBuffer =
-      askTracker(GetPreFetchStatuses(shuffleId,reduceId)).asInstanceOf[SerializableBuffer]
-    return ser.deserialize[ShuffleBlockInfo](fetchedInfoBytes.value)
-  }*/
-  //--mv
+
 
 
   /** Called to get current epoch number. */
@@ -286,10 +255,6 @@ private[spark] class MapOutputTrackerMaster(conf: SparkConf)
    */
   protected val mapStatuses = new TimeStampedHashMap[Int, Array[MapStatus]]()
 
-  //mv
-  protected val preFetchStatuses = new TimeStampedHashMap[Int,HashMap[Int,ShuffleBlockInfo]]
-  //--mv
-
   private val cachedSerializedStatuses = new TimeStampedHashMap[Int, Array[Byte]]()
 
   // For cleaning up TimeStampedHashMaps
@@ -337,12 +302,6 @@ private[spark] class MapOutputTrackerMaster(conf: SparkConf)
   override def unregisterShuffle(shuffleId: Int) {
     mapStatuses.remove(shuffleId)
     cachedSerializedStatuses.remove(shuffleId)
-    //mv
-    preFetchStatuses.remove(shuffleId)
-    removePreFetchPrinciple(shuffleId)
-
-
-    //--mv
   }
 
   /** Check if the given shuffle is being tracked */
@@ -356,30 +315,6 @@ private[spark] class MapOutputTrackerMaster(conf: SparkConf)
       logDebug("Increasing epoch to " + epoch)
     }
   }
-
-  //mv 关于预调度的调度规则相关代码
-  private[this] val shuffleIdToPrinciple = new HashMap[Int,Array[String]]
-
-  def getPreFetchPrinciple(shuffleId:Int):Array[String] = {
-    return shuffleIdToPrinciple.getOrElse(shuffleId,Array())
-  }
-
-  def addPreFetchPrinciple(shuffleId:Int,principle:Array[String]): Unit ={
-
-    shuffleIdToPrinciple.synchronized {
-      shuffleIdToPrinciple.put(shuffleId, principle)
-    }
-  }
-
-  def removePreFetchPrinciple(shuffleId:Int): Unit ={
-    shuffleIdToPrinciple.synchronized {
-      if (shuffleIdToPrinciple.contains(shuffleId)) {
-        shuffleIdToPrinciple.remove(shuffleId)
-      }
-    }
-  }
-
-  //--mv
 
   def getSerializedMapOutputStatuses(shuffleId: Int): Array[Byte] = {
     var statuses: Array[MapStatus] = null
@@ -422,62 +357,6 @@ private[spark] class MapOutputTrackerMaster(conf: SparkConf)
     mapStatuses.clearOldValues(cleanupTime)
     cachedSerializedStatuses.clearOldValues(cleanupTime)
   }
-
-
-  //mv 注意垃圾回收
-  /**
-   * 这里很重要的一点就是默认预取的任务属于一个shuffle的分配方式一致，也就是同样reduce task的所有预取块都放到
-   * 一个节点上，如果放在不同节点会出bug，这点在调度的实现的时候要考虑。
-   * @param preFetchResult
-   */
-  def updatePreFetchResult(preFetchResult:ShuffleBlockInfo): Unit = {
-    val loc = preFetchResult.loc
-    val shuffleId =
-      preFetchResult.shuffleBlockIds.head.asInstanceOf[ShufflePreBlockId].shuffleId
-    val blockIds = preFetchResult.shuffleBlockIds.map(_.asInstanceOf[ShufflePreBlockId])
-    val sizes = preFetchResult.blockSizes
-    val reduceToBlockInfo = blockIds.zip(sizes).groupBy(_._1.reduceId)
-    //先更新内部的reduceId到shuffleBlockInfo的映射，再更新外部映射
-    preFetchStatuses.synchronized {
-      for ((rid, bInfo) <- reduceToBlockInfo) {
-        val hmap = preFetchStatuses.getOrElse(shuffleId, new HashMap[Int, ShuffleBlockInfo])
-        val sInfo = hmap.getOrElse(rid,
-          new ShuffleBlockInfo(loc, Array[BlockId](), Array[Long]()))
-        sInfo.shuffleBlockIds ++= bInfo.map(_._1)
-        sInfo.blockSizes ++= bInfo.map(_._2)
-        hmap.update(rid, sInfo)
-        preFetchStatuses.update(shuffleId, hmap)
-
-       /* preFetchStatuses(shuffleId)(rid).shuffleBlockIds.foreach {
-          case x =>
-          logInfo("%%%%%% preFetchStatuses(shuffleId)(rid).shuffleBlockIds.length "
-            + x.toString + " %%%%%%")
-        }*/
-
-      }
-    }
-  }
-
-
-  //master端提取preFetch结果
-  def getPreFetchInfo(shuffleId:Int,reduceId:Int):ShuffleBlockInfo = {
-    preFetchStatuses.synchronized {
-      preFetchStatuses.get(shuffleId) match {
-        case Some(hmap) =>
-          hmap.get(reduceId) match {
-            case Some(sIf) =>
-              //logInfo(" %%%%%% getPreFetchInfo " + sIf.blockSizes.length + " %%%%%%")
-              return sIf
-            case _ => return null.asInstanceOf[ShuffleBlockInfo]
-          }
-        case _ => return null.asInstanceOf[ShuffleBlockInfo]
-      }
-    }
-  }
-
-
-
-
 }
 
 /**

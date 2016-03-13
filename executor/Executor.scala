@@ -21,14 +21,13 @@ import java.io.File
 import java.lang.management.ManagementFactory
 import java.net.URL
 import java.nio.ByteBuffer
-import java.nio.file.Files
 import java.util.concurrent._
 
 import org.apache.spark.network.buffer.ManagedBuffer
 import org.apache.spark.network.shuffle.BlockFetchingListener
 
 import scala.collection.JavaConversions._
-import scala.collection.mutable.{Queue, ArrayBuffer, HashMap}
+import scala.collection.mutable.{ArrayBuffer, HashMap}
 import scala.util.control.NonFatal
 
 import akka.actor.Props
@@ -36,7 +35,7 @@ import akka.actor.Props
 import org.apache.spark._
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.scheduler._
-import org.apache.spark.shuffle.{ShuffleBlockInfo, FetchFailedException}
+import org.apache.spark.shuffle.{FetchFailedException}
 import org.apache.spark.storage._
 import org.apache.spark.util.{ChildFirstURLClassLoader, MutableURLClassLoader,
   SparkUncaughtExceptionHandler, AkkaUtils, Utils}
@@ -320,7 +319,7 @@ private[spark] class Executor(
       //当返回的status为空时，说明新的stage已经开始执行，这次要求预取的是正在执行的status的数据，不存在输出。也就是说这时候的预取可以停止了，
       //因为没有预取结果所以也不需要通知master。
       if(statuses.filter(_._1 != null).length == 0)  return
-      logInfo("%%%%%% executor get statuses length " + statuses.filter(_._1 != null).length + " shuffleId " + shuffleId)
+      //logInfo("%%%%%% executor get statuses length " + statuses.filter(_._1 != null).length + " shuffleId " + shuffleId)
       val splitsByAddress = new HashMap[BlockManagerId, ArrayBuffer[(Int, Long)]]
       for (((address, size), index) <- statuses.zipWithIndex.filter(_._1._1 != null)) {
         splitsByAddress.getOrElseUpdate(address, ArrayBuffer()) += ((index, size))
