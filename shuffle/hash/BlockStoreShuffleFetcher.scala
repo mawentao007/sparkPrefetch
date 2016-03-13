@@ -49,46 +49,34 @@ private[hash] object BlockStoreShuffleFetcher extends Logging {
     val statuses = SparkEnv.get.mapOutputTracker.getServerStatuses(shuffleId, reduceId)
 
     //修改后之查看本地是否预取，不再考虑其它节点的预取
-    val info =
+    val preStatus =
       SparkEnv.get.mapOutputTracker.asInstanceOf[MapOutputTrackerWorker].getPreStatuses(shuffleId,reduceId)
+
+    if(preStatus.size > 0) {
+      logInfo("%%%%%% preFetch blocks used num is " + preStatus.size)
+    }
+    
+    val preFetchedBlocks = new HashSet[BlockId]
+
+    for((bId,size,buf)<-preStatus){
+      preFetchedBlocks.add(bId)
+    }
     
     logDebug("Fetching map output location for shuffle %d, reduce %d took %d ms".format(
       shuffleId, reduceId, System.currentTimeMillis - startTime))
 
-      //status的所有块到地址的映射
+      //status的所有块到地址的映射,去除已经缓存的块
     val allBlockToLoc = new HashMap[(BlockId,Long),BlockManagerId]
     for (((address, size), index) <- statuses.zipWithIndex) {
-      allBlockToLoc.put((ShuffleBlockId(shuffleId, index, reduceId), size), address)
+      val blockId = ShuffleBlockId(shuffleId, index, reduceId)
+      if(!preFetchedBlocks.contains(blockId)) {
+        allBlockToLoc.put((blockId, size), address)
+      }
     }
 
     blocksByAddress = allBlockToLoc.toSeq.groupBy(_._2).map{case (a,b) => (a,b.map(_._1))}.toSeq
 
 
-    //info等于空的话不用更新
-    if(info.length != 0) {
-      val updatedBlockToLoc = new HashMap[(BlockId, Long), BlockManagerId]
-
-      val preBlocksMapId = new HashSet[Int]
-      for((preBlockId,size) <- info){
-        preBlocksMapId.add(preBlockId.asInstanceOf[ShufflePreBlockId].mapId)
-      }
-
-
-      //开始更新
-      for (((blockId,size), loc) <- allBlockToLoc) {
-        val mapId = blockId.asInstanceOf[ShuffleBlockId].mapId
-        if (loc.host != blockManagerId.host && preBlocksMapId.contains(mapId)) {
-          updatedBlockToLoc.put((ShufflePreBlockId(shuffleId,mapId,reduceId),size),blockManagerId)
-        } else {
-          updatedBlockToLoc.put((blockId,size), loc)
-        }
-      }
-
-      blocksByAddress =
-        updatedBlockToLoc.toSeq.groupBy(_._2).map{case (a,b) => (a,b.map(_._1))}.toSeq
-      logInfo("%%%%%% preFetch blocks and used is " + info.length)
-
-    }
 
 
     def unpackBlock(blockPair: (BlockId, Try[Iterator[Any]])) : Iterator[T] = {
@@ -120,7 +108,8 @@ private[hash] object BlockStoreShuffleFetcher extends Logging {
       blockManager,
       blocksByAddress,
       serializer,
-      SparkEnv.get.conf.getLong("spark.reducer.maxMbInFlight", 48) * 1024 * 1024)
+      SparkEnv.get.conf.getLong("spark.reducer.maxMbInFlight", 48) * 1024 * 1024,
+      preStatus)
     val itr = blockFetcherItr.flatMap(unpackBlock)
 
     val completionIter = CompletionIterator[T, Iterator[T]](itr, {

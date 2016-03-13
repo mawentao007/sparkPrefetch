@@ -356,23 +356,16 @@ private[spark] class Executor(
       val blockIds = req.blocks.map(_._1.toString)
       val address = req.address
       val blockNum = req.blocks.length
-      val preFetchResult = new LinkedBlockingQueue[(BlockId,Long)]()
+      val preFetchResult = new LinkedBlockingQueue[(BlockId,Long,ManagedBuffer)]()
       env.blockManager.shuffleClient.fetchBlocks(address.host, address.port, address.executorId, blockIds.toArray,
         new BlockFetchingListener {
           override def onBlockFetchSuccess(blockId: String, buf: ManagedBuffer): Unit = {
             buf.retain()
-            /**
-             * 写入的时候存为ShufflePreBlockId，返回服务器的也是这个Id
-             */
-            env.blockManager.putBlockData(
-              BlockId.toShufflePreBlockId(blockId),
-              buf,StorageLevel.DISK_ONLY)
-            preFetchResult.put(BlockId.toShufflePreBlockId(blockId),sizeMap(blockId))
+            val bId = BlockId(blockId)
+            preFetchResult.put((bId, sizeMap(blockId), buf))
             if(preFetchResult.size() == blockNum){
               sendResultBack()
             }
-
-            buf.release()
           }
 
           override def onBlockFetchFailure(blockId: String, e: Throwable): Unit = {
@@ -386,12 +379,11 @@ private[spark] class Executor(
         //这里有个小技巧，直接用toArray()不可行。
         //val preFetchedBlockIds:Array[ShuffleBlockId] = preFetchResult.toArray(new Array[ShuffleBlockId](0))
         if(preFetchResult.isEmpty) return
-        val preFetchedBlockIdsAndSize = new ArrayBuffer[(BlockId,Long)]()
+        val preFetchedBlockIdsAndSize = new ArrayBuffer[(BlockId,Long,ManagedBuffer)]()
         while(!preFetchResult.isEmpty){
-
-          val (blockId,size) = preFetchResult.take()
+          val (blockId,size,buf) = preFetchResult.take()
           //logInfo(" %%%%%% preFetchResult take() " + blockId.toString + " %%%%%%")
-          preFetchedBlockIdsAndSize.append((blockId,size))
+          preFetchedBlockIdsAndSize.append((blockId,size,buf))
         }
         val tracker = SparkEnv.get.mapOutputTracker.asInstanceOf[MapOutputTrackerWorker]
         tracker.putPreStatuses(shuffleId,reduceId,preFetchedBlockIdsAndSize.toArray)
@@ -399,7 +391,6 @@ private[spark] class Executor(
         execBackend.preFetchResultUpdate()
       }
     }
-
 
 
     case class FetchRequest(address: BlockManagerId, blocks: Seq[(BlockId, Long)]) {

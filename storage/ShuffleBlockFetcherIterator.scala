@@ -56,8 +56,9 @@ final class ShuffleBlockFetcherIterator(
     blockManager: BlockManager,
     blocksByAddress: Seq[(BlockManagerId, Seq[(BlockId, Long)])],
     serializer: Serializer,
-    maxBytesInFlight: Long)
-  extends Iterator[(BlockId, Try[Iterator[Any]])] with Logging {
+    maxBytesInFlight: Long,
+    preStatus:Array[(BlockId,Long,ManagedBuffer)])
+extends Iterator[(BlockId, Try[Iterator[Any]])] with Logging {
 
   import ShuffleBlockFetcherIterator._
 
@@ -159,9 +160,6 @@ final class ShuffleBlockFetcherIterator(
             // This needs to be released after use.
             buf.retain()
             results.put(new SuccessFetchResult(BlockId(blockId), sizeMap(blockId), buf))
-            //mv 保存远端数据到本地
-            //blockManager.putBlockData(BlockId(blockId),buf,StorageLevel.DISK_ONLY)
-            //--mv
             shuffleMetrics.incRemoteBytesRead(buf.size)
             shuffleMetrics.incRemoteBlocksFetched(1)
           }
@@ -256,6 +254,11 @@ final class ShuffleBlockFetcherIterator(
   private[this] def initialize(): Unit = {
     // Add a task completion callback (called in both success case and failure case) to cleanup.
     context.addTaskCompletionListener(_ => cleanup())
+
+
+    for((bId,size,buf)<-preStatus){
+      results.put(new SuccessFetchResult(bId,size,buf))
+    }
 
     // Split local and remote blocks.
     val remoteRequests = splitLocalRemoteBlocks()

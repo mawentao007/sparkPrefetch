@@ -22,6 +22,8 @@ import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.{GZIPInputStream, GZIPOutputStream}
 
+import org.apache.spark.network.buffer.ManagedBuffer
+
 import scala.collection.mutable
 import scala.collection.mutable.{HashMap, HashSet, Map}
 import scala.concurrent.Await
@@ -486,11 +488,11 @@ private[spark] class MapOutputTrackerWorker(conf: SparkConf) extends MapOutputTr
   protected val mapStatuses: Map[Int, Array[MapStatus]] =
     new ConcurrentHashMap[Int, Array[MapStatus]]
 
-  //mv
+  //mv 注意buf的内存泄露问题
 
-  val preStatuses = new HashMap[Int,Map[Int,Array[(BlockId,Long)]]]
+  val preStatuses = new HashMap[Int,Map[Int,Array[(BlockId,Long,ManagedBuffer)]]]
 
-  def getPreStatuses(shuffleId: Int, reduceId: Int):Array[(BlockId,Long)]  = {
+  def getPreStatuses(shuffleId: Int, reduceId: Int):Array[(BlockId,Long,ManagedBuffer)]  = {
     preStatuses.get(shuffleId) match{
       case Some(map) => map.get(reduceId) match{
         case Some(array) => return array
@@ -500,7 +502,7 @@ private[spark] class MapOutputTrackerWorker(conf: SparkConf) extends MapOutputTr
     }
   }
 
-  def putPreStatuses(shuffleId:Int,reduceId:Int,result:Array[(BlockId,Long)]) = {
+  def putPreStatuses(shuffleId:Int,reduceId:Int,result:Array[(BlockId,Long,ManagedBuffer)]) = {
     preStatuses.get(shuffleId) match{
       case Some(map) => map.put(reduceId,result)
       case _ => val map = Map(reduceId->result)
