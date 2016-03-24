@@ -391,6 +391,7 @@ class DAGScheduler(
             dep match {
               case shufDep: ShuffleDependency[_, _, _] =>
                 val mapStage = getShuffleMapStage(shufDep, stage.jobId)
+                //如果是resultStage或者shufflemap但是outputLoc个数等于partition个数,这个stage都不需要考虑
                 if (!mapStage.isAvailable) {
                   missing += mapStage
                 }
@@ -834,6 +835,7 @@ class DAGScheduler(
    * 输出才是它需要的
    */
 
+  // 参数为shuffleId,reduceId,locations
   val preTaskSetByStage = new HashMap[Stage,HashSet[(Int,Int,Seq[TaskLocation])]]
 
   def getOneTask(executorId:String,host:String):Option[(Int,Int)] = {
@@ -853,7 +855,13 @@ class DAGScheduler(
                 info.remove((shuffleId, reduceId, locs))
                 return Some(shuffleId, reduceId)
               }
+            }else if(loc.isInstanceOf[TaskLocation]){
+              if(loc.host == host){
+                info.remove((shuffleId,reduceId,locs))
+                return Some(shuffleId,reduceId)
+              }
             }
+
           }
         }
       }
@@ -961,6 +969,9 @@ class DAGScheduler(
     val tasks: Seq[Task[_]] = if (stage.isShuffleMap) {
       partitionsToCompute.map { id =>
         val locs = getPreferredLocs(stage.rdd, id)
+        if(locs.length != 0) {
+          logInfo("%%%%%% stage is " + stage.toString + " locs is " + locs.head.host)
+        }
         val part = stage.rdd.partitions(id)
         new ShuffleMapTask(stage.id, taskBinary, part, locs)
       }
@@ -970,6 +981,9 @@ class DAGScheduler(
         val p: Int = job.partitions(id)
         val part = stage.rdd.partitions(p)
         val locs = getPreferredLocs(stage.rdd, p)
+        if(locs.length != 0) {
+          logInfo("%%%%%% stage is " + stage.toString + " locs is " + locs.head.host)
+        }
         new ResultTask(stage.id, taskBinary, part, locs, id)
       }
     }
@@ -1111,22 +1125,6 @@ class DAGScheduler(
             } else {
               stage.addOutputLoc(smt.partitionId, status)
             }
-            /**
-             * mv
-             * smt.partitionId就是mapId,还差reducedId,调度得来; stage.numPartitions
-             * 确定当前stage正在执行并且还有其它task在等待，否则当前task就是最后一个，不进行预取。
-             * 进行预取的话会阻碍下一个stage的开始。
-             * 根据百分比选择预取的任务数量，当完成的任务大于这个比例的时候，停止预取，因为预取结果很可能无法被利用。
-             * 这是根据不同数据量和不同任务得到的经验值。在spark-defaults.conf中配置
-             */
-            taskScheduler.addPrinciple(status.location.executorId,smt.partitionId)
-/*
-            if(runningStages.contains(stage) &&
-              (stage.pendingTasks.size.toDouble/stage.numTasks) > (1.0 - preFetchPercent.toDouble)) {
-              val shuffleId = stage.shuffleDep.get.shuffleId
-              taskScheduler.preFetchPrepare(shuffleId, smt.partitionId, status)
-            }
-*/
 
             /**
              * stage.pendingTasks在task完成时候才修改，我需要在等待队列为空的时候就处理

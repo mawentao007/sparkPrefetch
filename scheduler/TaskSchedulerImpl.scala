@@ -517,69 +517,6 @@ private[spark] class TaskSchedulerImpl(
 
   override def applicationId(): String = backend.applicationId()
 
-  val reduceIdToExecutors = new HashMap[Int,String]
-
-  //mv 这里完成块的整理，为下一层的调度做准备工作
-/*  override def preFetchPrepare(shuffleId:Int,mapId:Int,mapStatus:MapStatus): Unit ={
-    schePreFetch(shuffleId,mapId,mapStatus)
-  }*/
-
-  /**
-   * 注意一个问题就是每个shuffle对应的任务如果预取的话必须要放到同一个地方。这里用set出了一个bug，
-   * set在更新的时候内容的顺序不固定，导致一组task被分配到不同地方，而tracker在跟踪预取位置的时候
-   * 默认是放到同一个节点的，所以会出bug。
-   * @param executorId
-   * @param mapId
-   */
-  override def addPrinciple(executorId:String,mapId:Int): Unit ={
-    reduceIdToExecutors.update(mapId,executorId)
-  }
-
-  //mv
-
-/*  def schePreFetch(shuffleId:Int,mapId:Int,mapStatus:MapStatus): Unit ={
-    val tracker = mapOutputTracker.asInstanceOf[MapOutputTrackerMaster]
-    val principle:Array[String] =tracker.getPreFetchPrinciple(shuffleId)
-
-    principle match{
-      case  Array() =>
-        //logInfo("%%%%%% principle is empty %%%%%%")
-        val p  = backend.genPrinciple(mapStatus.getBlocksNum)
-        tracker.addPreFetchPrinciple(shuffleId,p)
-        sendToExecutor(shuffleId, mapId, mapStatus,p)
-      case _ =>
-        //logInfo("%%%%%% principle is not empty %%%%%%")
-        sendToExecutor(shuffleId, mapId, mapStatus,principle)
-    }*/
-
-/*    val tasks = mapStatus.getBlocksNum
-    val principle = new Array[String](tasks)
-    for( tid <- 0 to tasks - 1 ){
-      if(reduceIdToExecutors.contains(tid)){
-        principle(tid) = reduceIdToExecutors(tid)
-      }else{
-        principle(tid) = null
-      }
-    }
-    sendToExecutor(shuffleId, mapId, mapStatus,principle)
-
-  }*/
-
-
-  //给每个task预分配位置
-/*  def sendToExecutor( shuffleId:Int,mapId:Int,mapStatus:MapStatus,
-                   principle:Array[String]) = {
-    val loc = mapStatus.location
-    val exeIdToReduceTasks = principle.zipWithIndex.filter(_._1 != null).groupBy(_._1)
-    for((executorId,reduceTaskIds) <- exeIdToReduceTasks){
-      val blockSizes = reduceTaskIds.map(x => mapStatus.getSizeForBlock(x._2))
-      val blockIds:Array[BlockId] = reduceTaskIds.map(x => ShuffleBlockId(shuffleId,mapId,x._2))
-      if(loc.executorId != executorId) {
-        backend.sendPreFetchInfo(loc, executorId, blockIds, blockSizes)
-      }
-    }
-  }*/
-
   /**
    * 存在极限情况就是刚刚完成的stage的对于某个executor的预取已经结束但是还有资源，这时候
    * 恰好新的stage刚刚加入running队列，因此waiting和running队列都得到更新，这时候再预取是没有结果的。
@@ -591,59 +528,18 @@ private[spark] class TaskSchedulerImpl(
     val host = executorIdToHost(executorId)
     dagScheduler.getOneTask(executorId,host) match{
       case Some((shuffleId,reduceId)) =>
-        finishedPreTask.synchronized {
-          if (!finishedPreTask.contains((shuffleId, reduceId))) {
+       // finishedPreTask.synchronized {
+          //if (!finishedPreTask.contains((shuffleId, reduceId))) {
             dagScheduler.preRegisterMapStatus(shuffleId)
-            finishedPreTask.add((shuffleId, reduceId))
+            //finishedPreTask.add((shuffleId, reduceId))
             logInfo("%%%%%% preFetch for" + " shuffleId " + shuffleId + " executor " + executorId + " taskId " + reduceId)
             backend.preFetchData(executorId, shuffleId, reduceId)
-          }
-        }
+          //}
+        //}
       case None =>
         logInfo(" %%%%%% pre schedule failed ")
     }
   }
-/*
-  val preTasksByShuffleId = new HashMap[Int,HashSet[Int]]
-
-  def launchPreTask(executorId: String) = {
-    val stages = dagScheduler.getPreStage()
-    val iter = stages.iterator
-    while (iter.hasNext) {
-      val (stage,shuffleId) = iter.next()
-      val taskNum = stage.numTasks
-      preTasksByShuffleId.synchronized {
-        val finishPreSet =
-          preTasksByShuffleId.get(shuffleId) match {
-            case Some(set) =>
-              set
-            case _ =>
-              //没有相应的shuffleId的进行过预取，必须先注册相应stage的结果到mapOutputTracker
-              dagScheduler.preRegisterMapStatus(shuffleId)
-              HashSet[Int]()
-          }
-
-        for (taskId <- 0 to taskNum  1) {
-          if (!finishPreSet.contains(taskId)) {
-            reduceIdToExecutors.get(taskId) match {
-              case Some(eId) =>
-                if (eId == executorId) {
-                  logInfo("%%%%%% preFetch for stage " + stage.toString + " shuffleId " + shuffleId + " executor " + executorId + " taskId " + taskId)
-                  finishPreSet.add(taskId)
-                  preTasksByShuffleId.update(shuffleId,finishPreSet)
-                  backend.preFetchData(stage.rdd.id, eId, shuffleId, taskId)
-                }
-              case _ =>
-            }
-          }
-        }
-      }
-    }
-  }
-*/
-
-  //--mv
-
 }
 
 

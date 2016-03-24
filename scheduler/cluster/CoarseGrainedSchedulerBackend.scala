@@ -170,20 +170,6 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
       case RetrieveSparkProps =>
         sender ! sparkProperties
 
-      //  mv
-/*      case PreFetchDataInternal(executorId, serializedShuffleBlockInfo) =>
-        try {
-          executorDataMap.get(executorId) match {
-            case Some(executorData) =>
-              //  注意一定要用SerializableBuffer!!!
-              executorData.executorActor !
-                PreFetchData(new SerializableBuffer(serializedShuffleBlockInfo))
-            case None =>
-          }
-        } catch {
-          case e:Exception => logInfo("Some thing wrong")
-        }*/
-
       case PreFetch(executorId,shuffleId,reduceId) =>
         executorDataMap.get(executorId) match {
           case Some(executorData) =>
