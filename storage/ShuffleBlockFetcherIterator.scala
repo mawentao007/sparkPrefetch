@@ -259,6 +259,7 @@ extends Iterator[(BlockId, Try[Iterator[Any]])] with Logging {
     for((bId,size,buf)<-preStatus){
       results.put(new SuccessFetchResult(bId,size,buf))
     }
+    numBlocksToFetch = preStatus.size
 
     // Split local and remote blocks.
     val remoteRequests = splitLocalRemoteBlocks()

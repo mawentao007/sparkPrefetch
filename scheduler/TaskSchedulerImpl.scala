@@ -532,12 +532,12 @@ private[spark] class TaskSchedulerImpl(
           //if (!finishedPreTask.contains((shuffleId, reduceId))) {
             dagScheduler.preRegisterMapStatus(shuffleId)
             //finishedPreTask.add((shuffleId, reduceId))
-            logInfo("%%%%%% preFetch for" + " shuffleId " + shuffleId + " executor " + executorId + " taskId " + reduceId)
+            //logInfo("%%%%%% preFetch for" + " shuffleId " + shuffleId + " executor " + executorId + " taskId " + reduceId)
             backend.preFetchData(executorId, shuffleId, reduceId)
           //}
         //}
       case None =>
-        logInfo(" %%%%%% pre schedule failed ")
+        //logInfo(" %%%%%% pre schedule failed ")
     }
   }
 }

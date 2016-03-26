@@ -969,9 +969,6 @@ class DAGScheduler(
     val tasks: Seq[Task[_]] = if (stage.isShuffleMap) {
       partitionsToCompute.map { id =>
         val locs = getPreferredLocs(stage.rdd, id)
-        if(locs.length != 0) {
-          logInfo("%%%%%% stage is " + stage.toString + " locs is " + locs.head.host)
-        }
         val part = stage.rdd.partitions(id)
         new ShuffleMapTask(stage.id, taskBinary, part, locs)
       }
@@ -981,9 +978,6 @@ class DAGScheduler(
         val p: Int = job.partitions(id)
         val part = stage.rdd.partitions(p)
         val locs = getPreferredLocs(stage.rdd, p)
-        if(locs.length != 0) {
-          logInfo("%%%%%% stage is " + stage.toString + " locs is " + locs.head.host)
-        }
         new ResultTask(stage.id, taskBinary, part, locs, id)
       }
     }
