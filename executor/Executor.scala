@@ -130,6 +130,7 @@ private[spark] class Executor(
     val tr = new TaskRunner(context, taskId = taskId, attemptNumber = attemptNumber, taskName,
       serializedTask)
     runningTasks.put(taskId, tr)
+    killPreTask()
     threadPool.execute(tr)
   }
 
@@ -302,24 +303,47 @@ private[spark] class Executor(
 
 
   //mv
+  /**
+   * 记录正在执行的预取任务
+   */
+  private val runningPreTasks = new ConcurrentHashMap[String, FetchRunner]
 
-  def startPreFetch( backend: ExecutorBackend,shuffleId:Int, reduceId:Int)={
-    val fr = new FetchRunner(backend,shuffleId,reduceId)
+  /**
+   * 将所有预取任务都杀死,杀死之前提交预取结果
+   */
+  def killPreTask() = {
+    val frs = runningPreTasks.values()
+    runningPreTasks.keySet().foreach { case n =>
+      logInfo("%%%%% preTask " + n + " killed")
+    }
+    runningPreTasks.clear()
+
+    frs.map(_.kill)
+  }
+
+  def startPreFetch( backend: ExecutorBackend,shuffleId:Int, reduceId:Int,data:ByteBuffer)={
+    val pTaskId = shuffleId + "_" + reduceId
+    val fr = new FetchRunner(backend,shuffleId,reduceId,pTaskId,data)
+    runningPreTasks.put(pTaskId,fr)
     threadPool.execute(fr)
   }
 
-  class FetchRunner(execBackend: ExecutorBackend, shuffleId:Int, reduceId:Int)
+  class FetchRunner(execBackend: ExecutorBackend,
+                    shuffleId:Int,
+                    reduceId:Int,
+                    pTaskId:String,
+                    data:ByteBuffer)
     extends Runnable{
 
-    private[this] val maxBytesInFlight = SparkEnv.get.conf.getLong("spark.reducer.maxMbInFlight", 48) * 1024 * 1024
-
+    val preFetchResult = new LinkedBlockingQueue[(BlockId, Long, ManagedBuffer)]()
 
     override def run():Unit = {
-      val statuses = SparkEnv.get.mapOutputTracker.getServerStatuses(shuffleId, reduceId)
+      val ser = SparkEnv.get.closureSerializer.newInstance()
+      val statuses = ser.deserialize[Array[(BlockManagerId,Long)]](data)
       //当返回的status为空时，说明新的stage已经开始执行，这次要求预取的是正在执行的status的数据，不存在输出。也就是说这时候的预取可以停止了，
       //因为没有预取结果所以也不需要通知master。
       if(statuses.filter(_._1 != null).length == 0)  return
-      //logInfo("%%%%%% executor get statuses length " + statuses.filter(_._1 != null).length + " shuffleId " + shuffleId)
+      logInfo("%%%%%% executor get statuses length " + statuses.filter(_._1 != null).length + " shuffleId " + shuffleId)
       val splitsByAddress = new HashMap[BlockManagerId, ArrayBuffer[(Int, Long)]]
       for (((address, size), index) <- statuses.zipWithIndex.filter(_._1._1 != null)) {
         splitsByAddress.getOrElseUpdate(address, ArrayBuffer()) += ((index, size))
@@ -338,12 +362,19 @@ private[spark] class Executor(
           }
       }
     }
+    
+    def kill() = {
+      submitPreResult(false)
+      try {
+        Thread.currentThread().interrupt()
+      }catch{
+        case e => logInfo("%%%%%% kill task something " + e.getMessage)
+      }
+    }
 
     private[this] def buildFetchRequest(
                                          loc: BlockManagerId,
                                          blockIdToSize: Array[(BlockId, Long)]): FetchRequest = {
-      val targetRequestSize = math.max(maxBytesInFlight / 5, 1L)
-      logDebug("maxBytesInFlight: " + maxBytesInFlight + ", targetRequestSize: " + targetRequestSize)
       val nonEmptyBlockIdToSize = blockIdToSize.filter(_._2 != 0)
       val fetchRequest = new FetchRequest(loc, nonEmptyBlockIdToSize)
       fetchRequest
@@ -355,15 +386,14 @@ private[spark] class Executor(
       val blockIds = req.blocks.map(_._1.toString)
       val address = req.address
       val blockNum = req.blocks.length
-      val preFetchResult = new LinkedBlockingQueue[(BlockId,Long,ManagedBuffer)]()
       env.blockManager.shuffleClient.fetchBlocks(address.host, address.port, address.executorId, blockIds.toArray,
         new BlockFetchingListener {
           override def onBlockFetchSuccess(blockId: String, buf: ManagedBuffer): Unit = {
             buf.retain()
             val bId = BlockId(blockId)
             preFetchResult.put((bId, sizeMap(blockId), buf))
-            if(preFetchResult.size() == blockNum){
-              sendResultBack()
+            if (preFetchResult.size() == blockNum) {
+              submitPreResult(true)
             }
           }
 
@@ -372,125 +402,31 @@ private[spark] class Executor(
           }
         }
       )
+    }
 
       //fetch完成的时候就发送获取结果回去
-      def sendResultBack() {
+      def submitPreResult(sendBack:Boolean) {
         //这里有个小技巧，直接用toArray()不可行。
         //val preFetchedBlockIds:Array[ShuffleBlockId] = preFetchResult.toArray(new Array[ShuffleBlockId](0))
         if(preFetchResult.isEmpty) return
         val preFetchedBlockIdsAndSize = new ArrayBuffer[(BlockId,Long,ManagedBuffer)]()
         while(!preFetchResult.isEmpty){
           val (blockId,size,buf) = preFetchResult.take()
-          //logInfo(" %%%%%% preFetchResult take() " + blockId.toString + " %%%%%%")
           preFetchedBlockIdsAndSize.append((blockId,size,buf))
         }
         val tracker = SparkEnv.get.mapOutputTracker.asInstanceOf[MapOutputTrackerWorker]
         tracker.putPreStatuses(shuffleId,reduceId,preFetchedBlockIdsAndSize.toArray)
+        runningPreTasks.remove(pTaskId)
 
-        execBackend.preFetchResultUpdate()
+        if(sendBack) execBackend.preFetchResultUpdate()
       }
-    }
+    
 
 
     case class FetchRequest(address: BlockManagerId, blocks: Seq[(BlockId, Long)]) {
       val size = blocks.map(_._2).sum
     }
   }
-
-/*  class PreFetchRunner(
-      execBackend: ExecutorBackend,
-      serializedShuffleBlockInfo: ByteBuffer)
-    extends Runnable {
-
-    private[this] val preFetchResult = new LinkedBlockingQueue[(BlockId,Long)]()
-
-    private[this] val maxBytesInFlight = SparkEnv.get.conf.getLong("spark.reducer.maxMbInFlight", 48) * 1024 * 1024
-
-    override def run(): Unit = {
-      val ser = env.closureSerializer.newInstance()
-      val shuffleBlockInfo = ser.deserialize[ShuffleBlockInfo](serializedShuffleBlockInfo)
-      val targetLoc = shuffleBlockInfo.loc
-      val blockIdToSize: Array[(BlockId, Long)] =
-        shuffleBlockInfo.shuffleBlockIds.zip(shuffleBlockInfo.blockSizes)
-     /* blockIdToSize.foreach{x =>
-        logInfo("%%%%%% fetch " + targetLoc.executorId + " " + x._1 + " %%%%%%%" )
-      }*/
-
-      val fetchRequest = buildFetchRequest(targetLoc,blockIdToSize)
-      sendRequest(fetchRequest)
-    }
-
-
-    private[this] def buildFetchRequest(
-                                         loc: BlockManagerId,
-                                         blockIdToSize: Array[(BlockId, Long)]): FetchRequest = {
-      val targetRequestSize = math.max(maxBytesInFlight / 5, 1L)
-      logDebug("maxBytesInFlight: " + maxBytesInFlight + ", targetRequestSize: " + targetRequestSize)
-      val nonEmptyBlockIdToSize = blockIdToSize.filter(_._2 != 0)
-      val fetchRequest = new FetchRequest(loc, nonEmptyBlockIdToSize)
-      fetchRequest
-    }
-
-
-    private[this] def sendRequest(req: FetchRequest) {
-      val sizeMap = req.blocks.map { case (blockId, size) => (blockId.toString, size) }.toMap
-      val blockIds = req.blocks.map(_._1.toString)
-      val address = req.address
-      val blockNum = req.blocks.length
-      //logInfo("%%%%%% preFetch blockNum is " + blockNum + "%%%%%%")
-      env.blockManager.shuffleClient.fetchBlocks(address.host, address.port, address.executorId, blockIds.toArray,
-        new BlockFetchingListener {
-          override def onBlockFetchSuccess(blockId: String, buf: ManagedBuffer): Unit = {
-            buf.retain()
-            /**
-             * 写入的时候存为ShufflePreBlockId，返回服务器的也是这个Id
-             */
-            env.blockManager.putBlockData(
-              BlockId.toShufflePreBlockId(blockId),
-              buf,StorageLevel.DISK_ONLY)
-            //env.blockManager.getStatus(BlockId(blockId)) match{
-//              case Some(s) =>
-//                logInfo("%%%%%% write block " + blockId + " size is " + s.memSize + " %%%%%%")
-//              case None =>
-//                logInfo("%%%%%% write block " + blockId + " failed %%%%%%" )
-            // }
-
-            preFetchResult.put(BlockId.toShufflePreBlockId(blockId),sizeMap(blockId))
-            if(preFetchResult.size() == blockNum){
-              sendResultBack()
-            }
-
-            buf.release()
-          }
-
-          override def onBlockFetchFailure(blockId: String, e: Throwable): Unit = {
-            logError(s"Failed to get block(s) from ${req.address.host}:${req.address.port}", e)
-          }
-        }
-      )
-    }
-
-    //fetch完成的时候就发送获取结果回去
-    private[this] def sendResultBack() {
-      //这里有个小技巧，直接用toArray()不可行。
-      //val preFetchedBlockIds:Array[ShuffleBlockId] = preFetchResult.toArray(new Array[ShuffleBlockId](0))
-      if(preFetchResult.isEmpty) return
-      val preFetchedBlockIdsAndSize = new ArrayBuffer[(BlockId,Long)]()
-      while(!preFetchResult.isEmpty){
-
-        val (blockId,size) = preFetchResult.take()
-        //logInfo(" %%%%%% preFetchResult take() " + blockId.toString + " %%%%%%")
-        preFetchedBlockIdsAndSize.append((blockId,size))
-      }
-
-      execBackend.preFetchResultUpdate(preFetchedBlockIdsAndSize.toArray)
-    }
-
-    case class FetchRequest(address: BlockManagerId, blocks: Seq[(BlockId, Long)]) {
-      val size = blocks.map(_._2).sum
-    }
-  }*/
-  //--mv
 
   /**
    * Create a ClassLoader for use in tasks, adding any JARs specified by the user or any classes

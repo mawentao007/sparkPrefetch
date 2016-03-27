@@ -814,16 +814,24 @@ class DAGScheduler(
    * @param shuffleId
    */
 
-  def  preRegisterMapStatus(shuffleId:Int) ={
-    runningStages.foreach{
-      case st => if(st.isShuffleMap && st.shuffleDep.get.shuffleId == shuffleId){
-        mapOutputTracker.registerMapOutputs(
-          shuffleId,
-          st.outputLocs.map(list => if (list.isEmpty) null else list.head).toArray,
-          changeEpoch = true)
-      }
-    }
+  def  getPreTaskData(shuffleId:Int,reduceId:Int):Array[(BlockManagerId, Long)] ={
+    val stage = shuffleToMapStage(shuffleId)
+    val status = stage.outputLocs.map(list => if (list.isEmpty) null else list.head).toArray
+    convertMapStatuses(reduceId,status)
+  }
 
+  def convertMapStatuses(
+                          reduceId: Int,
+                          statuses: Array[MapStatus]): Array[(BlockManagerId, Long)] = {
+    assert(statuses != null)
+    statuses.map {
+      status =>
+        if (status == null) {
+          (null, 0L)
+        } else {
+          (status.location, status.getSizeForBlock(reduceId))
+        }
+    }
   }
 
   /**

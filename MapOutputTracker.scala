@@ -429,13 +429,9 @@ private[spark] object MapOutputTracker extends Logging {
     statuses.map {
       status =>
         if (status == null) {
-          /**
-           * 因为提前fetch有一部分status是空的，因此要处理这里，不报错。
-           */
-          /*logError("Missing an output location for shuffle " + shuffleId)
+          logError("Missing an output location for shuffle " + shuffleId)
           throw new MetadataFetchFailedException(
-            shuffleId, reduceId, "Missing an output location for shuffle " + shuffleId)*/
-          (null,0L)
+            shuffleId, reduceId, "Missing an output location for shuffle " + shuffleId)
         } else {
           (status.location, status.getSizeForBlock(reduceId))
         }

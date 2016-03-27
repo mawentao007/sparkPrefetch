@@ -170,21 +170,15 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
       case RetrieveSparkProps =>
         sender ! sparkProperties
 
-      case PreFetch(executorId,shuffleId,reduceId) =>
+      case PreFetch(executorId,shuffleId,reduceId,data) =>
         executorDataMap.get(executorId) match {
           case Some(executorData) =>
-            executorData.executorActor ! PreFetch(null,shuffleId,reduceId)
+            executorData.executorActor ! PreFetch(null,shuffleId,reduceId,data)
           case None =>
         }
         //  slave 发来的成功预取的消息
       case PreFetchFinished(executorId) =>
-//        val ser = SparkEnv.get.closureSerializer.newInstance()
-//        val result:ShuffleBlockInfo = ser.deserialize[ShuffleBlockInfo](data.value)
-//        val trackerMaster = SparkEnv.get.mapOutputTracker.asInstanceOf[MapOutputTrackerMaster]
-//        //logInfo("%%%%%% master received preFetch result num " + result.blockSizes.length + " %%%%%%")
         makeOffers(executorId)
-
-
         //  --mv
 
     }
@@ -204,11 +198,11 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
        * 这里比较两个空余核数量，如果不变说明此次分配失败，没有新任务。
        */
       val executorData = executorDataMap(executorId)
-      val freeCores = executorData.freeCores
-      launchTasks(scheduler.resourceOffers(
-        Seq(new WorkerOffer(executorId, executorData.executorHost, executorData.freeCores))))
-      val newFreeCores = executorData.freeCores
-      if(freeCores == newFreeCores){
+      val tasks = scheduler.resourceOffers(
+        Seq(new WorkerOffer(executorId, executorData.executorHost, executorData.freeCores)))
+      if(tasks.head.length != 0) {
+        launchTasks(tasks)
+      }else{
         scheduler.launchPreTask(executorId:String)
       }
 
@@ -399,8 +393,13 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
     driverActor ! PreFetchDataInternal(destExecutorId, serializedShuffleBlockInfo)
   }*/
 
-  def preFetchData(eId:String,shuffleId:Int,taskId:Int) = {
-    driverActor ! PreFetch(eId,shuffleId,taskId)
+  def preFetchData(eId:String,
+                   shuffleId:Int,
+                   taskId:Int,
+                   blockMangerIdAndSize:Array[(BlockManagerId, Long)]) = {
+    val ser  = SparkEnv.get.closureSerializer.newInstance()
+    val data = ser.serialize[Array[(BlockManagerId,Long)]](blockMangerIdAndSize)
+    driverActor ! PreFetch(eId,shuffleId,taskId,new SerializableBuffer(data))
   }
   // mv
 

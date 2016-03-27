@@ -210,7 +210,6 @@ class FileShuffleBlockManager(conf: SparkConf)
     shuffleStates.get(shuffleId) match {
       case Some(state) =>
         if (consolidateShuffleFiles) {
-          //logInfo("%%%%%% removeShuffleBlocks is consolidateShuffleFiles %%%%%%")
           for (fileGroup <- state.allFileGroups; file <- fileGroup.files) {
             file.delete()
           }

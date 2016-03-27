@@ -48,7 +48,10 @@ private[spark] trait SchedulerBackend {
  /* def genPrinciple(reduceTaskNum:Int):Array[String]
   def sendPreFetchInfo(sourceBlockManagerId:BlockManagerId, destExecutorId:String,
                  blockIds:Array[BlockId],sizes:Array[Long]): Unit*/
-  def preFetchData(eId:String,shuffleId:Int,taskId:Int)
+  def preFetchData(eId:String,
+                   shuffleId:Int,
+                   taskId:Int,
+                   blockManagerIdAndSize:Array[(BlockManagerId, Long)])
 
   //--mv
 
