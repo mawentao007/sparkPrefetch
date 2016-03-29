@@ -37,8 +37,7 @@ import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.scheduler._
 import org.apache.spark.shuffle.{FetchFailedException}
 import org.apache.spark.storage._
-import org.apache.spark.util.{ChildFirstURLClassLoader, MutableURLClassLoader,
-  SparkUncaughtExceptionHandler, AkkaUtils, Utils}
+import org.apache.spark.util._
 
 /**
  * Spark executor used with Mesos, YARN, and the standalone scheduler.
@@ -130,7 +129,6 @@ private[spark] class Executor(
     val tr = new TaskRunner(context, taskId = taskId, attemptNumber = attemptNumber, taskName,
       serializedTask)
     runningTasks.put(taskId, tr)
-    //killPreTask()
     threadPool.execute(tr)
   }
 

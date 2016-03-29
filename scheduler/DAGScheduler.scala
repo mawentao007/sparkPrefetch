@@ -845,6 +845,7 @@ class DAGScheduler(
 
   // 参数为shuffleId,reduceId,locations
   val preTaskSetByStage = new HashMap[Stage,HashSet[(Int,Int,Seq[TaskLocation])]]
+  val finishedPreStages = new HashSet[Stage]
 
   def getOneTask(executorId:String,host:String):Option[(Int,Int)] = {
     if(preTaskSetByStage.size == 0) {
@@ -904,7 +905,10 @@ class DAGScheduler(
       for (stage <- waitingStages) {
         getOneStage(stage) match {
           case Some((k,v)) =>
-            preTaskSetByStage.put(k,v)
+            if(!finishedPreStages.contains(k)) {
+              finishedPreStages.add(k)
+              preTaskSetByStage.put(k, v)
+            }
           case None =>
         }
       }
@@ -1133,6 +1137,9 @@ class DAGScheduler(
              */
             //--mv
             if (runningStages.contains(stage) && stage.pendingTasks.isEmpty) {
+              //marvin
+              Thread.sleep(1000 *  env.conf.getLong("spark.stagger.seconds",2))
+              //
               markStageAsFinished(stage)
               logInfo("looking for newly runnable stages")
               logInfo("running: " + runningStages)
