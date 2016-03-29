@@ -130,7 +130,7 @@ private[spark] class Executor(
     val tr = new TaskRunner(context, taskId = taskId, attemptNumber = attemptNumber, taskName,
       serializedTask)
     runningTasks.put(taskId, tr)
-    killPreTask()
+    //killPreTask()
     threadPool.execute(tr)
   }
 
@@ -306,24 +306,24 @@ private[spark] class Executor(
   /**
    * 记录正在执行的预取任务
    */
-  private val runningPreTasks = new ConcurrentHashMap[String, FetchRunner]
+  //private val runningPreTasks = new ConcurrentHashMap[String, FetchRunner]
 
   /**
    * 将所有预取任务都杀死,杀死之前提交预取结果
    */
-  def killPreTask() = {
+/*  def killPreTask() = {
     val frs = runningPreTasks.values()
     runningPreTasks.keySet().foreach { case n =>
       logInfo("%%%%% preTask " + n + " killed")
     }
     runningPreTasks.clear()
     frs.map(_.kill)
-  }
+  }*/
 
   def startPreFetch( backend: ExecutorBackend,shuffleId:Int, reduceId:Int,data:ByteBuffer)={
     val pTaskId = shuffleId + "_" + reduceId
     val fr = new FetchRunner(backend,shuffleId,reduceId,pTaskId,data)
-    runningPreTasks.put(pTaskId,fr)
+  //  runningPreTasks.put(pTaskId,fr)
     threadPool.execute(fr)
   }
 
@@ -373,18 +373,18 @@ private[spark] class Executor(
         case e:Exception =>
           submitPreResult(false)
           taskFinished = System.currentTimeMillis()
-          logInfo("%%%%%% preFetchtask + killed " + pTaskId + " cost " + (taskFinished - taskStart))
+          logInfo("%%%%%% preFetchtask killed " + pTaskId + " cost " + (taskFinished - taskStart))
       }finally {
         taskFinished = System.currentTimeMillis()
-        logInfo("%%%%%% preFetchtask + " + pTaskId + " cost " + (taskFinished - taskStart))
+        logInfo("%%%%%% preFetchtask " + pTaskId + " cost " + (taskFinished - taskStart))
         env.shuffleMemoryManager.releaseMemoryForThisThread()
         env.blockManager.memoryStore.releaseUnrollMemoryForThisThread()
       }
     }
 
-    def kill() = {
+ /*   def kill() = {
         preTaskThread.interrupt()
-    }
+    }*/
 
     private[this] def buildFetchRequest(
                                          loc: BlockManagerId,
@@ -429,7 +429,7 @@ private[spark] class Executor(
           }
           val tracker = SparkEnv.get.mapOutputTracker.asInstanceOf[MapOutputTrackerWorker]
           tracker.putPreStatuses(shuffleId, reduceId, preFetchedBlockIdsAndSize.toArray)
-          runningPreTasks.remove(pTaskId)
+          //runningPreTasks.remove(pTaskId)
 
           if (sendBack) {
             execBackend.preFetchResultUpdate()
