@@ -36,9 +36,6 @@ private[hash] object BlockStoreShuffleFetcher extends Logging {
       serializer: Serializer)
     : Iterator[T] =
   {
-    /**
-     * 有一种比较复杂的情况是块本来在a节点，被预调度到b，则a，b上都有块；但是正式分配的时候又被调度到a，实际上就不需要再去远端获取相应块，这里要处理一下。
-     */
     logDebug("Fetching outputs for shuffle %d, reduce %d".format(shuffleId, reduceId))
     var  blocksByAddress:Seq[(BlockManagerId,Seq[(BlockId,Long)])] = null
     val blockManager = SparkEnv.get.blockManager

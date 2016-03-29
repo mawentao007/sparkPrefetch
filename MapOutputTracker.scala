@@ -369,13 +369,16 @@ private[spark] class MapOutputTrackerWorker(conf: SparkConf) extends MapOutputTr
 
   //mv 注意buf的内存泄露问题
 
-  val preStatuses = new HashMap[Int,Map[Int,Array[(BlockId,Long,ManagedBuffer)]]]
+  val preStatuses = new ConcurrentHashMap[Int,ConcurrentHashMap[Int,Array[(BlockId,Long,ManagedBuffer)]]]
 
   def getPreStatuses(shuffleId: Int, reduceId: Int):Array[(BlockId,Long,ManagedBuffer)]  = {
     preStatuses.get(shuffleId) match{
-      case Some(map) => map.get(reduceId) match{
-        case Some(array) => return array
-        case _ => return Array()
+      case map:ConcurrentHashMap[Int,Array[(BlockId,Long,ManagedBuffer)]] =>
+        map.get(reduceId) match{
+        case array:Array[(_,_,_)] =>
+          return array
+        case _ =>
+          return Array()
       }
       case _ => Array()
     }
@@ -383,8 +386,11 @@ private[spark] class MapOutputTrackerWorker(conf: SparkConf) extends MapOutputTr
 
   def putPreStatuses(shuffleId:Int,reduceId:Int,result:Array[(BlockId,Long,ManagedBuffer)]) = {
     preStatuses.get(shuffleId) match{
-      case Some(map) => map.put(reduceId,result)
-      case _ => val map = Map(reduceId->result)
+      case map:ConcurrentHashMap[Int,Array[(BlockId,Long,ManagedBuffer)]] =>
+        map.put(reduceId,result)
+      case _ =>
+        val map = new ConcurrentHashMap[Int,Array[(BlockId,Long,ManagedBuffer)]]()
+        map.put(reduceId,result)
         preStatuses.put(shuffleId,map)
     }
   }

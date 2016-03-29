@@ -317,7 +317,6 @@ private[spark] class Executor(
       logInfo("%%%%% preTask " + n + " killed")
     }
     runningPreTasks.clear()
-
     frs.map(_.kill)
   }
 
@@ -335,41 +334,56 @@ private[spark] class Executor(
                     data:ByteBuffer)
     extends Runnable{
 
-    val preFetchResult = new LinkedBlockingQueue[(BlockId, Long, ManagedBuffer)]()
+    var preTaskThread:Thread = _
+
+    val preFetchResult = new ConcurrentLinkedDeque[(BlockId, Long, ManagedBuffer)]()
+    var blocksToFetch = 0
 
     override def run():Unit = {
-      val ser = SparkEnv.get.closureSerializer.newInstance()
-      val statuses = ser.deserialize[Array[(BlockManagerId,Long)]](data)
-      //当返回的status为空时，说明新的stage已经开始执行，这次要求预取的是正在执行的status的数据，不存在输出。也就是说这时候的预取可以停止了，
-      //因为没有预取结果所以也不需要通知master。
-      if(statuses.filter(_._1 != null).length == 0)  return
-      logInfo("%%%%%% executor get statuses length " + statuses.filter(_._1 != null).length + " shuffleId " + shuffleId)
-      val splitsByAddress = new HashMap[BlockManagerId, ArrayBuffer[(Int, Long)]]
-      for (((address, size), index) <- statuses.zipWithIndex.filter(_._1._1 != null)) {
-        splitsByAddress.getOrElseUpdate(address, ArrayBuffer()) += ((index, size))
-      }
+      preTaskThread = Thread.currentThread()
+      val taskStart = System.currentTimeMillis()
+      var taskFinished:Long = 0
+      try {
 
-      val blocksByAddress: Seq[(BlockManagerId, Seq[(BlockId, Long)])] = splitsByAddress.toSeq.map {
-        case (address, splits) =>
-          (address, splits.filter(_._2 != 0).map(s => (ShuffleBlockId(shuffleId, s._1, reduceId), s._2)))
-      }
+        val ser = SparkEnv.get.closureSerializer.newInstance()
+        val statuses = ser.deserialize[Array[(BlockManagerId,Long)]](data)
+        val host = env.blockManager.blockManagerId.host
 
-      blocksByAddress.foreach{
-        case (address,blocks) =>
-          if(address.host != env.blockManager.blockManagerId.host && blocks.length != 0){
-            val request = buildFetchRequest(address,blocks.toArray)
+        logInfo("%%%%%% executor get statuses length " + statuses.count(_._1 != null) + " shuffleId " + shuffleId)
+        val splitsByAddress = new HashMap[BlockManagerId, ArrayBuffer[(Int, Long)]]
+        val filterStatus =
+          statuses.zipWithIndex.filter(x => x._1._1 != null && x._1._1.host != host)
+        blocksToFetch = filterStatus.length
+        for (((address, size), index) <- filterStatus) {
+          splitsByAddress.getOrElseUpdate(address, ArrayBuffer()) += ((index, size))
+        }
+
+        val blocksByAddress: Seq[(BlockManagerId, Seq[(BlockId, Long)])] = splitsByAddress.toSeq.map {
+          case (address, splits) =>
+            (address, splits.filter(_._2 != 0).map(s => (ShuffleBlockId(shuffleId, s._1, reduceId), s._2)))
+        }
+
+        blocksByAddress.foreach {
+          case (address, blocks) =>
+            val request = buildFetchRequest(address, blocks.toArray)
             sendRequest(request)
-          }
+        }
+
+      }catch{
+        case e:Exception =>
+          submitPreResult(false)
+          taskFinished = System.currentTimeMillis()
+          logInfo("%%%%%% preFetchtask + killed " + pTaskId + " cost " + (taskFinished - taskStart))
+      }finally {
+        taskFinished = System.currentTimeMillis()
+        logInfo("%%%%%% preFetchtask + " + pTaskId + " cost " + (taskFinished - taskStart))
+        env.shuffleMemoryManager.releaseMemoryForThisThread()
+        env.blockManager.memoryStore.releaseUnrollMemoryForThisThread()
       }
     }
-    
+
     def kill() = {
-      submitPreResult(false)
-      try {
-        Thread.currentThread().interrupt()
-      }catch{
-        case e => logInfo("%%%%%% kill task something " + e.getMessage)
-      }
+        preTaskThread.interrupt()
     }
 
     private[this] def buildFetchRequest(
@@ -385,14 +399,13 @@ private[spark] class Executor(
       val sizeMap = req.blocks.map { case (blockId, size) => (blockId.toString, size) }.toMap
       val blockIds = req.blocks.map(_._1.toString)
       val address = req.address
-      val blockNum = req.blocks.length
       env.blockManager.shuffleClient.fetchBlocks(address.host, address.port, address.executorId, blockIds.toArray,
         new BlockFetchingListener {
           override def onBlockFetchSuccess(blockId: String, buf: ManagedBuffer): Unit = {
             buf.retain()
             val bId = BlockId(blockId)
-            preFetchResult.put((bId, sizeMap(blockId), buf))
-            if (preFetchResult.size() == blockNum) {
+            preFetchResult.add((bId, sizeMap(blockId), buf))
+            if(preFetchResult.size() == blocksToFetch){
               submitPreResult(true)
             }
           }
@@ -408,17 +421,22 @@ private[spark] class Executor(
       def submitPreResult(sendBack:Boolean) {
         //这里有个小技巧，直接用toArray()不可行。
         //val preFetchedBlockIds:Array[ShuffleBlockId] = preFetchResult.toArray(new Array[ShuffleBlockId](0))
-        if(preFetchResult.isEmpty) return
-        val preFetchedBlockIdsAndSize = new ArrayBuffer[(BlockId,Long,ManagedBuffer)]()
-        while(!preFetchResult.isEmpty){
-          val (blockId,size,buf) = preFetchResult.take()
-          preFetchedBlockIdsAndSize.append((blockId,size,buf))
-        }
-        val tracker = SparkEnv.get.mapOutputTracker.asInstanceOf[MapOutputTrackerWorker]
-        tracker.putPreStatuses(shuffleId,reduceId,preFetchedBlockIdsAndSize.toArray)
-        runningPreTasks.remove(pTaskId)
+        if(!preFetchResult.isEmpty) {
+          val preFetchedBlockIdsAndSize = new ArrayBuffer[(BlockId, Long, ManagedBuffer)]()
+          while (!preFetchResult.isEmpty) {
+            val (blockId, size, buf) = preFetchResult.pop()
+            preFetchedBlockIdsAndSize.append((blockId, size, buf))
+          }
+          val tracker = SparkEnv.get.mapOutputTracker.asInstanceOf[MapOutputTrackerWorker]
+          tracker.putPreStatuses(shuffleId, reduceId, preFetchedBlockIdsAndSize.toArray)
+          runningPreTasks.remove(pTaskId)
 
-        if(sendBack) execBackend.preFetchResultUpdate()
+          if (sendBack) {
+            execBackend.preFetchResultUpdate()
+          } else {
+            logInfo("%%%%%% task killed fetched num " + preFetchedBlockIdsAndSize.length)
+          }
+        }
       }
     
 
