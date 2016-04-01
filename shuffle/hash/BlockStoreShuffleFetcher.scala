@@ -50,7 +50,7 @@ private[hash] object BlockStoreShuffleFetcher extends Logging {
       SparkEnv.get.mapOutputTracker.asInstanceOf[MapOutputTrackerWorker].getPreStatuses(shuffleId,reduceId)
 
     if(preStatus.size > 0) {
-      logInfo("%%%%%% preFetch blocks used num is " + preStatus.size)
+      logInfo("%%%%%% preFetch blocks used num is " + preStatus.size + " task " + shuffleId + "_" + reduceId)
     }
     
     val preFetchedBlocks = new HashSet[BlockId]
@@ -66,9 +66,6 @@ private[hash] object BlockStoreShuffleFetcher extends Logging {
     val allBlockToLoc = new HashMap[(BlockId,Long),BlockManagerId]
     for (((address, size), index) <- statuses.zipWithIndex) {
       val blockId = ShuffleBlockId(shuffleId, index, reduceId)
-     /* if(preFetchedBlocks.contains(blockId)){
-        logInfo("%%%%%% origin bid and size " + blockId + " " + size)
-      }*/
       if(!preFetchedBlocks.contains(blockId)) {
         allBlockToLoc.put((blockId, size), address)
       }

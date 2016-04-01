@@ -523,15 +523,17 @@ private[spark] class TaskSchedulerImpl(
    * 这种情况mapStatus就是0.
    */
 
-  def launchPreTask(executorId:String): Unit ={
+  def launchPreTask(executorId:String,numExecutors:Int): Unit ={
     val host = executorIdToHost(executorId)
-    dagScheduler.getOneTask(executorId,host) match{
+    dagScheduler.getOneTask(executorId,host,numExecutors) match{
       case Some((shuffleId,reduceId)) =>
             val blockManagerIdAndSize = dagScheduler.getPreTaskData(shuffleId,reduceId)
-            logInfo("%%%%%% preFetch for" + " shuffleId " + shuffleId + " executor " + executorId + " taskId " + reduceId)
-            backend.preFetchData(executorId, shuffleId, reduceId,blockManagerIdAndSize)
+            //logInfo("%%%%%% preFetch for" + " shuffleId " + shuffleId + " executor " + executorId + " taskId " + reduceId)
+            if(blockManagerIdAndSize.count(_._1 != null) != 0) {
+              backend.preFetchData(executorId, shuffleId, reduceId, blockManagerIdAndSize)
+            }
       case None =>
-        logInfo(" %%%%%% pre schedule failed ")
+        //logInfo(" %%%%%% pre schedule failed ")
     }
   }
 }

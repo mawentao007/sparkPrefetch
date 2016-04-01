@@ -19,7 +19,7 @@ package org.apache.spark.scheduler
 
 import java.io.NotSerializableException
 import java.util.Properties
-import java.util.concurrent.{TimeUnit, Executors}
+import java.util.concurrent.{ConcurrentHashMap, TimeUnit, Executors}
 import java.util.concurrent.atomic.AtomicInteger
 
 
@@ -847,7 +847,17 @@ class DAGScheduler(
   val preTaskSetByStage = new HashMap[Stage,HashSet[(Int,Int,Seq[TaskLocation])]]
   val finishedPreStages = new HashSet[Stage]
 
-  def getOneTask(executorId:String,host:String):Option[(Int,Int)] = {
+  //对于noPre的任务,进行预调度
+  val noPreSchInfo = new ConcurrentHashMap[RDD[_],HashMap[(String,String),HashSet[Int]]]
+
+  def putIntoNoPreSchInfo(stage:Stage,
+                          host:String,
+                          executorId:String,
+                          reduceId:Int) = {
+
+  }
+
+  def getOneTask(executorId:String,host:String,numExecutors:Int):Option[(Int,Int)] = {
     if(preTaskSetByStage.size == 0) {
       generatePreStage()
     }
@@ -858,19 +868,54 @@ class DAGScheduler(
         preTaskSetByStage.remove(stage)
       } else {
         for ((shuffleId, reduceId, locs) <- info) {
-          for (loc <- locs) {
-            if (loc.isInstanceOf[ExecutorCacheTaskLocation]) {
-              if (loc.asInstanceOf[ExecutorCacheTaskLocation].executorId == executorId) {
+          if(locs.length == 0){
+            noPreSchInfo.get(stage.rdd) match{
+              case hMap:HashMap[(String,String),HashSet[Int]] =>
+                hMap.get((host,executorId)) match{
+                  case Some(hSet) =>
+                    if(hSet.size < stage.numPartitions/numExecutors) {
+                      hSet.add(reduceId)
+                      logInfo("%%%%%% noPre task " + reduceId +
+                        " shuffleId " + shuffleId + " to " + executorId)
+                      info.remove((shuffleId, reduceId, locs))
+                      return Some((shuffleId,reduceId))
+                    }
+                    return None
+                  case None =>
+                    val hSet = new HashSet[Int]
+                    hSet.add(reduceId)
+                    hMap.put((host,executorId),hSet)
+                    logInfo("%%%%%% noPre task " + reduceId +
+                      " shuffleId " + shuffleId + " to " + executorId)
+                    info.remove((shuffleId, reduceId, locs))
+                    return Some((shuffleId,reduceId))
+                }
+              case null =>
+                val hMap = new HashMap[(String,String),HashSet[Int]]
+                val hSet = new HashSet[Int]
+                hSet.add(reduceId)
+                hMap.put((host,executorId),hSet)
+                noPreSchInfo.put(stage.rdd,hMap)
+                logInfo("%%%%%% noPre task " + reduceId +
+                  " shuffleId " + shuffleId + " to " + executorId)
                 info.remove((shuffleId, reduceId, locs))
-                return Some(shuffleId, reduceId)
-              }
-            }else if(loc.isInstanceOf[TaskLocation]){
-              if(loc.host == host){
-                info.remove((shuffleId,reduceId,locs))
-                return Some(shuffleId,reduceId)
-              }
+                return Some((shuffleId,reduceId))
             }
 
+          }else {
+            for (loc <- locs) {
+              if (loc.isInstanceOf[ExecutorCacheTaskLocation]) {
+                if (loc.asInstanceOf[ExecutorCacheTaskLocation].executorId == executorId) {
+                  info.remove((shuffleId, reduceId, locs))
+                  return Some(shuffleId, reduceId)
+                }
+              } else if (loc.isInstanceOf[TaskLocation]) {
+                if (loc.host == host) {
+                  info.remove((shuffleId, reduceId, locs))
+                  return Some(shuffleId, reduceId)
+                }
+              }
+            }
           }
         }
       }
@@ -1477,13 +1522,16 @@ class DAGScheduler(
     //是说这个partition已经缓存在某个节点上，只需要计算即可。可否利用这里进行调度修改？
     val cached = getCacheLocs(rdd)(partition)
 
-    /**
-     * 针对当前的sparkRank例子，HadoopRDD实现了这个方法，也就是寻找preferLoc的时候到HadoopRDD会返回结果
-     * 在最开始的时候先通过rdd.preferredLocations找到位置，之后就被缓存
-     */
     if (!cached.isEmpty) {
       return cached
     }
+
+    val noPre = checkNoPre(rdd,partition)
+    if(!noPre.isEmpty){
+      logInfo("%%%%%% task " + partition + " match no pre")
+      return noPre
+    }
+
     // If the RDD has some placement preferences (as is the case for input RDDs), get those
     val rddPrefs = rdd.preferredLocations(rdd.partitions(partition)).toList
     if (!rddPrefs.isEmpty) {
@@ -1500,40 +1548,24 @@ class DAGScheduler(
             return locs
           }
         }
-        //mv
-      /**
-       * 在这之前，只要到达ShuffleDependency，就无法继续上溯，则返回的loc为Nil
-       * 这种实现有个好处就是只要有一个块prefetch完成，那么调度器就会沿用该规则！
-       * 注意blockManager中updateBlockInfo的问题，旧的块如何删除
-       * !!!这里出来一个大bug！因为将预取的块存为了pre，所以之前的根据shuffleBlockId
-       * 找preferLocation的方式应该改为根据shufflePreBlockId！
-       */
-/*      case s:ShuffleDependency[_,_,_]=>
-        //查看所有map块的位置（理应是同样的），避免第一个块还未到达
-        val mapTasksNum = s.rdd.partitions.length
-        val shufflePreBlockIds = new Array[BlockId](mapTasksNum)
-        for(mapTaskId <- 0 to mapTasksNum - 1){
-         shufflePreBlockIds(mapTaskId) = ShufflePreBlockId(s.shuffleId,mapTaskId,partition)
-        }
-        val locs = BlockManager.blockIdsToBlockManagers(shufflePreBlockIds,env,blockManagerMaster)
-        val taskLocs = shufflePreBlockIds.map { id:BlockId =>
-        locs.getOrElse(id, Nil).map(bm => TaskLocation(bm.host, bm.executorId))}
-        for(loc <- taskLocs){
-          if(!loc.isEmpty){
-            return loc
-          }
-        }*/
-
       case _ =>
-        //mv
     }
     Nil
   }
 
   //mv
-//  def registerPreFetchResult(result:PreFetchResultInfo): Unit ={
-//
-//  }
+  def checkNoPre(rdd:RDD[_],partition:Int): Seq[TaskLocation] = {
+    noPreSchInfo.get(rdd) match{
+      case hMap:HashMap[(String,String),HashSet[Int]] =>
+        for(((host,exeId),hSet) <- hMap){
+          if(hSet.contains(partition)){
+            return Seq(new ExecutorCacheTaskLocation(host,exeId))
+          }
+        }
+        Nil
+      case _ => Nil
+    }
+  }
   //--mv
 
   def stop() {

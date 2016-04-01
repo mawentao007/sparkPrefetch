@@ -203,7 +203,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
       if(tasks.head.length != 0) {
         launchTasks(tasks)
       }else{
-        scheduler.launchPreTask(executorId:String)
+        scheduler.launchPreTask(executorId,totalRegisteredExecutors.get())
       }
 
     }
