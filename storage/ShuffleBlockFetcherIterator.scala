@@ -57,7 +57,7 @@ final class ShuffleBlockFetcherIterator(
     blocksByAddress: Seq[(BlockManagerId, Seq[(BlockId, Long)])],
     serializer: Serializer,
     maxBytesInFlight: Long,
-    preStatus:Array[(BlockId,Long,ManagedBuffer)])
+    preStatus:Array[(BlockId,Long)])
 extends Iterator[(BlockId, Try[Iterator[Any]])] with Logging {
 
   import ShuffleBlockFetcherIterator._
@@ -256,10 +256,9 @@ extends Iterator[(BlockId, Try[Iterator[Any]])] with Logging {
     context.addTaskCompletionListener(_ => cleanup())
 
 
-    for((bId,size,buf)<-preStatus){
-      results.put(new SuccessFetchResult(bId,size,buf))
+    for((bId,size)<-preStatus){
+      localBlocks += bId
     }
-    numBlocksToFetch = preStatus.size
 
     // Split local and remote blocks.
     val remoteRequests = splitLocalRemoteBlocks()

@@ -335,7 +335,7 @@ private[spark] class Executor(
 
     var preTaskThread:Thread = _
 
-    val preFetchResult = new ConcurrentLinkedDeque[(BlockId, Long, ManagedBuffer)]()
+    val preFetchResult = new ConcurrentLinkedDeque[(BlockId, Long)]()
     var blocksToFetch = 0
 
     override def run():Unit = {
@@ -402,8 +402,10 @@ private[spark] class Executor(
         new BlockFetchingListener {
           override def onBlockFetchSuccess(blockId: String, buf: ManagedBuffer): Unit = {
             buf.retain()
-            val bId = BlockId(blockId)
-            preFetchResult.add((bId, sizeMap(blockId), buf))
+            val bId = BlockId.toShufflePreBlockId(blockId)
+            preFetchResult.add((bId, sizeMap(blockId)))
+            env.blockManager.putBlockData(bId,buf,StorageLevel.DISK_ONLY)
+            buf.release()
             if(preFetchResult.size() == blocksToFetch){
               submitPreResult(true)
             }
@@ -421,10 +423,10 @@ private[spark] class Executor(
         //这里有个小技巧，直接用toArray()不可行。
         //val preFetchedBlockIds:Array[ShuffleBlockId] = preFetchResult.toArray(new Array[ShuffleBlockId](0))
         if(!preFetchResult.isEmpty) {
-          val preFetchedBlockIdsAndSize = new ArrayBuffer[(BlockId, Long, ManagedBuffer)]()
+          val preFetchedBlockIdsAndSize = new ArrayBuffer[(BlockId, Long)]()
           while (!preFetchResult.isEmpty) {
-            val (blockId, size, buf) = preFetchResult.pop()
-            preFetchedBlockIdsAndSize.append((blockId, size, buf))
+            val (blockId, size) = preFetchResult.pop()
+            preFetchedBlockIdsAndSize.append((blockId, size))
           }
           val tracker = SparkEnv.get.mapOutputTracker.asInstanceOf[MapOutputTrackerWorker]
           tracker.putPreStatuses(shuffleId, reduceId, preFetchedBlockIdsAndSize.toArray)

@@ -46,7 +46,7 @@ private[hash] object BlockStoreShuffleFetcher extends Logging {
     val statuses = SparkEnv.get.mapOutputTracker.getServerStatuses(shuffleId, reduceId)
 
     //修改后之查看本地是否预取，不再考虑其它节点的预取
-    val preStatus =
+    val preStatus:Array[(BlockId,Long)] =
       SparkEnv.get.mapOutputTracker.asInstanceOf[MapOutputTrackerWorker].getPreStatuses(shuffleId,reduceId)
 
     if(preStatus.size > 0) {
@@ -55,7 +55,7 @@ private[hash] object BlockStoreShuffleFetcher extends Logging {
     
     val preFetchedBlocks = new HashSet[BlockId]
 
-    for((bId,size,buf)<-preStatus){
+    for((bId,size)<-preStatus){
       preFetchedBlocks.add(bId)
     }
     
@@ -66,7 +66,8 @@ private[hash] object BlockStoreShuffleFetcher extends Logging {
     val allBlockToLoc = new HashMap[(BlockId,Long),BlockManagerId]
     for (((address, size), index) <- statuses.zipWithIndex) {
       val blockId = ShuffleBlockId(shuffleId, index, reduceId)
-      if(!preFetchedBlocks.contains(blockId)) {
+      val preBlockId = ShufflePreBlockId(shuffleId,index,reduceId)
+      if(!preFetchedBlocks.contains(preBlockId)) {
         allBlockToLoc.put((blockId, size), address)
       }
     }
