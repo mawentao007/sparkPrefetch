@@ -850,6 +850,11 @@ class DAGScheduler(
   //对于noPre的任务,进行预调度
   val noPreSchInfo = new ConcurrentHashMap[RDD[_],HashMap[(String,String),HashSet[Int]]]
 
+  val preSchInfo = new HashMap[(Stage,String),Int]
+
+  val preFactor = SparkEnv.get.conf.getDouble("spark.preFactor",0.8)
+
+
   def putIntoNoPreSchInfo(stage:Stage,
                           host:String,
                           executorId:String,
@@ -861,26 +866,27 @@ class DAGScheduler(
     if(preTaskSetByStage.size == 0) {
       generatePreStage()
     }
+
     val iter = preTaskSetByStage.iterator
     while (iter.hasNext) {
       val (stage, info) = iter.next()
       if (info.size == 0) {
         preTaskSetByStage.remove(stage)
       } else {
+        val num = preSchInfo.getOrElse((stage,executorId),0)
+        if(num >= stage.numPartitions * preFactor / numExecutors)  return None
         for ((shuffleId, reduceId, locs) <- info) {
           if(locs.length == 0){
+            preSchInfo.update((stage,executorId),num+1)
             noPreSchInfo.get(stage.rdd) match{
               case hMap:HashMap[(String,String),HashSet[Int]] =>
                 hMap.get((host,executorId)) match{
-                  case Some(hSet) =>
-                    if(hSet.size < stage.numPartitions/numExecutors) {
-                      hSet.add(reduceId)
-                      logInfo("%%%%%% noPre task " + reduceId +
+                  case Some(hSet) => 
+                    hSet.add(reduceId)
+                    logInfo("%%%%%% noPre task " + reduceId +
                         " shuffleId " + shuffleId + " to " + executorId)
-                      info.remove((shuffleId, reduceId, locs))
-                      return Some((shuffleId,reduceId))
-                    }
-                    return None
+                    info.remove((shuffleId, reduceId, locs))
+                    return Some((shuffleId,reduceId))
                   case None =>
                     val hSet = new HashSet[Int]
                     hSet.add(reduceId)
@@ -906,11 +912,13 @@ class DAGScheduler(
             for (loc <- locs) {
               if (loc.isInstanceOf[ExecutorCacheTaskLocation]) {
                 if (loc.asInstanceOf[ExecutorCacheTaskLocation].executorId == executorId) {
+                  preSchInfo.update((stage,executorId),num+1)
                   info.remove((shuffleId, reduceId, locs))
                   return Some(shuffleId, reduceId)
                 }
               } else if (loc.isInstanceOf[TaskLocation]) {
                 if (loc.host == host) {
+                  preSchInfo.update((stage,executorId),num+1)
                   info.remove((shuffleId, reduceId, locs))
                   return Some(shuffleId, reduceId)
                 }
@@ -1496,7 +1504,12 @@ class DAGScheduler(
    */
   private[spark]
   def getPreferredLocs(rdd: RDD[_], partition: Int): Seq[TaskLocation] = {
-    getPreferredLocsInternal(rdd, partition, new HashSet)
+    val loc = getPreferredLocsInternal(rdd, partition, new HashSet)
+    if(loc.isEmpty){
+      return getNoPre(rdd,partition,new HashSet)
+    }else{
+      return loc
+    }
   }
 
   /**
@@ -1526,12 +1539,6 @@ class DAGScheduler(
       return cached
     }
 
-    val noPre = checkNoPre(rdd,partition)
-    if(!noPre.isEmpty){
-      logInfo("%%%%%% task " + partition + " match no pre")
-      return noPre
-    }
-
     // If the RDD has some placement preferences (as is the case for input RDDs), get those
     val rddPrefs = rdd.preferredLocations(rdd.partitions(partition)).toList
     if (!rddPrefs.isEmpty) {
@@ -1554,18 +1561,37 @@ class DAGScheduler(
   }
 
   //mv
-  def checkNoPre(rdd:RDD[_],partition:Int): Seq[TaskLocation] = {
+  def getNoPre(rdd:RDD[_],
+                 partition:Int,
+                 visited: HashSet[(RDD[_],Int)]): Seq[TaskLocation] = {
+    if (!visited.add((rdd,partition))) {
+      return Nil
+    }
+
     noPreSchInfo.get(rdd) match{
-      case hMap:HashMap[(String,String),HashSet[Int]] =>
-        for(((host,exeId),hSet) <- hMap){
-          if(hSet.contains(partition)){
-            return Seq(new ExecutorCacheTaskLocation(host,exeId))
+      case hMap: HashMap[(String, String), HashSet[Int]] =>
+        for (((host, exeId), hSet) <- hMap) {
+          if (hSet.contains(partition)) {
+            return Seq(new ExecutorCacheTaskLocation(host, exeId))
           }
         }
-        Nil
-      case _ => Nil
+      case _ =>
     }
+
+
+    rdd.dependencies.foreach {
+      case n: NarrowDependency[_] =>
+        for (inPart <- n.getParents(partition)) {
+          val locs = getPreferredLocsInternal(n.rdd, inPart, visited)
+          if (locs != Nil) {
+            return locs
+          }
+        }
+      case _ =>
+    }
+    Nil
   }
+
   //--mv
 
   def stop() {

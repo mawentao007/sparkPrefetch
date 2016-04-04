@@ -237,6 +237,7 @@ extends Iterator[(BlockId, Try[Iterator[Any]])] with Logging {
       val blockId = iter.next()
       try {
         val buf = blockManager.getBlockData(blockId)
+        //logInfo("%%%%%% block id " + blockId.toString + " size " + buf.size())
         shuffleMetrics.incLocalBlocksFetched(1)
         shuffleMetrics.incLocalBytesRead(buf.size)
         buf.retain()

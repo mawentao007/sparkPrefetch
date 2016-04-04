@@ -523,6 +523,8 @@ private[spark] class TaskSchedulerImpl(
    * 这种情况mapStatus就是0.
    */
 
+
+
   def launchPreTask(executorId:String,numExecutors:Int): Unit ={
     val host = executorIdToHost(executorId)
     dagScheduler.getOneTask(executorId,host,numExecutors) match{

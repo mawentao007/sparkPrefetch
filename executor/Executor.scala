@@ -404,7 +404,7 @@ private[spark] class Executor(
             buf.retain()
             val bId = BlockId.toShufflePreBlockId(blockId)
             preFetchResult.add((bId, sizeMap(blockId)))
-            env.blockManager.putBlockData(bId,buf,StorageLevel.DISK_ONLY)
+            env.blockManager.putBytes(bId,buf.nioByteBuffer(),StorageLevel.DISK_ONLY,false)
             buf.release()
             if(preFetchResult.size() == blocksToFetch){
               submitPreResult(true)
